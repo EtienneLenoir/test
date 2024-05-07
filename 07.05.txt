@@ -1,0 +1,911 @@
+Function TrouverCoordonneesTableaux() As Object
+    Dim ws As Worksheet
+    Dim startCol As Long
+    Dim endCol As Long
+    Dim startRow As Long
+    Dim endRow As Long
+    Dim tableauCount As Integer
+    Dim i As Long
+    Dim j As Long
+    Dim resultDict As Object
+    
+    ' Créer un nouvel objet Dictionary
+    Set resultDict = CreateObject("Scripting.Dictionary")
+    
+    ' Référence à la feuille de calcul active
+    Set ws = ActiveSheet
+    
+    ' Initialisation des variables
+    startCol = 1
+    tableauCount = 0
+    
+    ' Parcours des colonnes
+    For i = 1 To ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+        ' Vérifier si la colonne est vide
+        If WorksheetFunction.CountA(ws.Columns(i)) = 0 Then
+            ' Si la colonne précédente n'était pas vide, c'est la fin d'un tableau
+            If startCol <> i - 1 Then
+                endCol = i - 1
+                ' Vérifier si le tableau a au moins 3 lignes et 3 colonnes
+                If endCol - startCol >= 2 And endRow - startRow >= 2 Then
+                    ' Ajouter les coordonnées du tableau au dictionnaire
+                    resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+                End If
+            End If
+            ' Réinitialiser la colonne de départ
+            startCol = i + 1
+        End If
+    Next i
+    
+    ' Gérer le dernier tableau s'il se termine à la dernière colonne de la feuille
+    If startCol <= ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column Then
+        endCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+        ' Vérifier si le dernier tableau a au moins 3 lignes et 3 colonnes
+        If endCol - startCol >= 2 And endRow - startRow >= 2 Then
+            ' Ajouter les coordonnées du dernier tableau au dictionnaire
+            resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+        End If
+    End If
+    
+    ' Si aucun tableau avec 3 lignes et 3 colonnes n'est trouvé, essayer avec 2 lignes et 3 colonnes
+    If resultDict.Count = 0 Then
+        For i = 1 To ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+            ' Vérifier si la colonne est vide
+            If WorksheetFunction.CountA(ws.Columns(i)) = 0 Then
+                ' Si la colonne précédente n'était pas vide, c'est la fin d'un tableau
+                If startCol <> i - 1 Then
+                    endCol = i - 1
+                    ' Vérifier si le tableau a au moins 2 lignes et 3 colonnes
+                    If endCol - startCol >= 2 And endRow - startRow >= 1 Then
+                        ' Ajouter les coordonnées du tableau au dictionnaire
+                        resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+                    End If
+                End If
+                ' Réinitialiser la colonne de départ
+                startCol = i + 1
+            End If
+        Next i
+        
+        ' Gérer le dernier tableau s'il se termine à la dernière colonne de la feuille
+        If startCol <= ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column Then
+            endCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+            ' Vérifier si le dernier tableau a au moins 2 lignes et 3 colonnes
+            If endCol - startCol >= 2 And endRow - startRow >= 1 Then
+                ' Ajouter les coordonnées du dernier tableau au dictionnaire
+                resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+            End If
+        End If
+    End If
+    
+    ' Si aucun tableau avec 3 lignes et 3 colonnes ou 2 lignes et 3 colonnes n'est trouvé, essayer avec 2 lignes et 2 colonnes
+    If resultDict.Count = 0 Then
+        For i = 1 To ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+            ' Vérifier si la colonne est vide
+            If WorksheetFunction.CountA(ws.Columns(i)) = 0 Then
+                ' Si la colonne précédente n'était pas vide, c'est la fin d'un tableau
+                If startCol <> i - 1 Then
+                    endCol = i - 1
+                    ' Vérifier si le tableau a au moins 2 lignes et 2 colonnes
+                    If endCol - startCol >= 1 And endRow - startRow >= 1 Then
+                        ' Ajouter les coordonnées du tableau au dictionnaire
+                        resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+                    End If
+                End If
+                ' Réinitialiser la colonne de départ
+                startCol = i + 1
+            End If
+        Next i
+        
+        ' Gérer le dernier tableau s'il se termine à la dernière colonne de la feuille
+        If startCol <= ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column Then
+            endCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+            ' Vérifier si le dernier tableau a au moins 2 lignes et 2 colonnes
+            If endCol - startCol >= 1 And endRow - startRow >= 1 Then
+                ' Ajouter les coordonnées du dernier tableau au dictionnaire
+                resultDict.Add ws.Cells(startRow, startCol).Address & ":" & ws.Cells(endRow, endCol).Address, ws.Cells(startRow, startCol).Address
+            End If
+        End If
+    End If
+    
+    ' Retourner le dictionnaire
+    Set TrouverCoordonneesTableaux = resultDict
+End Function
+
+
+'TOP
+
+Sub EnregistrerPiecesJointes()
+
+    Dim OutlookApp As Object
+    Dim OutlookNamespace As Object
+    Dim Folder As Object
+    Dim MailItem As Object
+    Dim Attachment As Object
+    Dim SaveFolder As String
+    Dim DateLimite As Date
+    Dim MotCle As String
+    
+    ' Spécifiez le dossier de sauvegarde pour les pièces jointes
+    SaveFolder = "C:\Chemin\Vers\Le\Dossier\De\Sauvegarde\"
+    
+    ' Date limite pour les e-mails
+    DateLimite = Date - 7 ' Modifier la période si nécessaire
+    
+    ' Mot-clé pour le titre approximatif de l'e-mail
+    MotCle = "Mot-clé approximatif du titre de l'e-mail"
+    
+    ' Créer une instance Outlook
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookNamespace = OutlookApp.GetNamespace("MAPI")
+    
+    ' Accéder à la boîte de réception
+    Set Folder = OutlookNamespace.GetDefaultFolder(6) ' 6 = Boîte de réception
+    
+    ' Parcourir tous les e-mails dans le dossier
+    For Each MailItem In Folder.Items
+        ' Vérifier si l'e-mail correspond au critère de date et au titre approximatif
+        If MailItem.ReceivedTime > DateLimite And InStr(1, MailItem.subject, MotCle, vbTextCompare) > 0 Then
+            ' Parcourir toutes les pièces jointes de l'e-mail
+            For Each Attachment In MailItem.Attachments
+                ' Vérifier si la pièce jointe est un fichier Excel
+                If Right(Attachment.FileName, 4) = ".xls" Or Right(Attachment.FileName, 5) = ".xlsx" Then
+                    ' Enregistrer la pièce jointe dans le dossier spécifié
+                    Attachment.SaveAsFile SaveFolder & Attachment.FileName
+                End If
+            Next Attachment
+        End If
+    Next MailItem
+    
+    ' Libérer les objets Outlook
+    Set Attachment = Nothing
+    Set MailItem = Nothing
+    Set Folder = Nothing
+    Set OutlookNamespace = Nothing
+    Set OutlookApp = Nothing
+
+    MsgBox "Le processus est terminé."
+
+End Sub
+
+
+
+' ----------------------------------------------------------------
+' Procedure Name: PrepareMail
+' Purpose: Genere un mail et l'enregistre dans les draft
+' Procedure Kind: Sub
+' Procedure Access: Private
+' Parameter Sujet (String): object du mail
+' Parameter Destinataire (String): destinataire
+' Parameter CC (String): CC
+' Parameter CCI (String): CCI
+' Parameter ContenuEmail (String): contenu du mail
+' Parameter PieceJointe (String): PJ (facultatif)
+' Author: ut30j5
+' Date: 07/02/2022
+' ----------------------------------------------------------------
+Private Sub PrepareMail(ByVal Sujet As String, ByVal Destinataire As String, ByVal cc As String, ByVal CCI As String, ByVal ContenuEmail As String, Optional ByVal PieceJointe As String)
+
+    On Error GoTo EnvoyerEmailErreur
+
+    'définition des variables
+    Dim oOutlook As Outlook.Application
+    Dim oMailItem As Outlook.MailItem
+
+    'vérification si le Contenu du mail n'est pas vide. Si oui, email n'est pas envoyé. Si vous voulez pouvoir envoyer les email vides, mettez en commentaire les 4 lignes de code qui suivent.
+    If Len(ContenuEmail) = 0 Then
+        MsgBox "Mail non envoyé car vide", vbOKOnly, "Message"
+        Exit Sub
+    End If
+    
+    'préparer Outlook
+    PreparerOutlook oOutlook
+    Set oMailItem = oOutlook.CreateItem(0)
+    
+    'création de l'email
+    With oMailItem
+        .To = Destinataire
+        .cc = cc
+        .BCC = CCI
+        .subject = Sujet
+        
+        'FORMAT
+        'email formaté comme HTML (aussi par défaut)
+        '.BodyFormat = olFormatHTML
+        '.HTMLBody = "<html><p>" & ContenuEmail & "</p></html>"
+            
+        'email formaté comme simple texte sans formats
+        .BodyFormat = olText
+        .body = ContenuEmail
+            
+        'email formaté comme texte riche (= avec formats)
+        '.BodyFormat = olFormatRichText
+        '.Body = ContenuEmail
+        
+        If PieceJointe <> "" Then .Attachments.Add PieceJointe
+        
+        .Save
+    End With
+    
+    'nettoyage...
+    If (Not (oMailItem Is Nothing)) Then Set oMailItem = Nothing
+    If (Not (oOutlook Is Nothing)) Then Set oOutlook = Nothing
+    
+    Exit Sub
+EnvoyerEmailErreur:
+    If (Not (oMailItem Is Nothing)) Then Set oMailItem = Nothing
+    If (Not (oOutlook Is Nothing)) Then Set oOutlook = Nothing
+  
+    log.log niveaux.Critical, "Le mail n'a pas pu être préparé..."
+End Sub
+
+
+
+
+' ----------------------------------------------------------------
+' Procedure Name: PreparerOutlook
+' Purpose: Ce code vérifie si Outlook est prêt à envoyer des emails... Et s'il ne l'est pas, il le prépare.
+' Procedure Kind: Sub
+' Procedure Access: Private
+' ----------------------------------------------------------------
+Private Sub PreparerOutlook(ByRef oOutlook As Object)
+    On Error Resume Next
+    'vérification si Outlook est ouvert
+    Set oOutlook = GetObject(, "Outlook.Application")
+    
+    If (Err.Number > 0) Then 'si Outlook n'est pas ouvert, une instance est ouverte
+        Err.Clear
+        Set oOutlook = CreateObject("Outlook.Application")
+        
+        If (Err.Number > 0) Then
+            MsgBox "Une erreur est survenue lors de l'ouverture de Outlook..."
+            Exit Sub
+        Else
+        End If
+        
+    Else    'si Outlook est ouvert, l'instance existante est utilisée
+    End If
+End Sub
+
+
+
+
+
+
+Option Explicit
+
+Private Function outlook_reload() As Outlook.Application
+
+    On Error GoTo ErrHandler
+    
+    Static app As Outlook.Application
+
+    Select Case True
+        Case app Is Nothing, Len(app.name) = 0
+            Set app = GetObject(, "Outlook.Application")
+        
+        Case Else
+            Set app = Nothing
+            Exit Function
+    End Select
+    
+    Set outlook_reload = app
+
+Exit Function
+
+ErrHandler:
+    Select Case Err.Number
+        'Erreur d'exécution « 429 » : le composant ActiveX ne peut pas créer d'objet
+        'Erreur d'exécution 462, le serveur distant n'existe pas ou n'est pas disponible"
+        Case 429, 462
+            Shell ("OUTLOOK")
+            Set app = CreateObject("Outlook.Application")
+            
+            If app Is Nothing Then
+                Err.Raise 429, "OutlookApp", "Outlook Application does not appear to be installed."
+            End If
+            
+        Case Else
+            MsgBox "Error " & Err.Number & ": " & Err.description, vbCritical, "Unexpected error"
+    End Select
+    
+End Function
+
+
+Sub save_emails_folder()
+
+    Application.ScreenUpdating = False
+    
+    Dim app As Outlook.Application
+    Dim out_mail As Outlook.MailItem
+
+    Dim rng As Range
+    Dim rng_doc As Range
+    Dim period As Date
+    Dim from As String
+    Dim subject As String
+    Dim body As String
+    Dim file_name As String
+    Dim total_entity As Long
+    
+    Dim date_string As String
+    Dim rng_body As Range
+    Dim path_output_entite_mail As String
+    Dim file_msg As String
+    Dim answer As Integer
+    
+    'on purge le fichie des précédents msg
+    file_msg = [rng_output_mail].value & "*.msg*"
+    If Len(Dir$(file_msg)) > 0 Then
+        Kill file_msg
+    End If
+    
+    'on vérifie instance outlook
+    Call outlook_reload
+    
+    ' si erreur de protection on débloque et on relance le programme
+    If debug_mode Then On Error GoTo error_handler:
+    
+    Set rng = [rng_mail_start].Offset(1, 0)
+    period = [rng_date].value
+    total_entity = [rng_mail_start].End(xlDown).row - [rng_mail_start].row
+    
+        'Vérifications Chemin
+    '-----------------------------------------------
+    'ICI CHEMIN OUTPUT ENTITE
+    path_output_entite_mail = ws_main.[rng_output_mail]
+
+    
+    'On vérifie l'existence du chemin OUTPUT ENTITE
+    Call path_exists(CStr(path_output_entite_mail))
+    If path_exists(CStr(path_output_entite_mail)) = False Then
+        MsgBox "Error on  Mails output path, please see Path validity, check that it ends with \ "
+        Exit Sub
+    End If
+    
+    If Not Right(CStr(path_output_entite_mail), 1) = "\" Then
+        MsgBox "Error on Consolidated report output path, please see Path validity, check that it ends with \"
+        Exit Sub
+    End If
+    '-----------------------------------------------
+    While rng.value <> ""
+
+        'Fix parameter
+        from = [rng_from].value
+        
+        subject = Range("L15") & " for " & rng.value & " (E" & rng.Offset(0, 1).value & ") at " & period
+        body = [rng_from].Offset(0, 1).value 'body = [rng_body].Value
+        file_name = rng.Offset(0, 1).value & " " & ws_main.[rng_currency].value & ".xlsx"
+        date_string = Format([rng_date].value, "yyyy-mm-dd")
+  
+        Set app = CreateObject("Outlook.Application")
+        Set out_mail = app.CreateItem(olMailItem)
+    
+        With out_mail
+            .SentOnBehalfOfName = from
+            .To = rng.Offset(0, 2).value
+            .cc = rng.Offset(0, 3).value
+            .subject = subject
+            .body = body
+            .Attachments.Add [rng_output_entite].value & date_string & "_" & file_name
+            On Error GoTo error_handler_1
+            .SaveAs path_output_entite_mail & rng.value & ".msg"
+            On Error GoTo 0
+        End With
+        
+        Set out_mail = Nothing
+        Set app = Nothing
+        Set rng = rng.Offset(1, 0)
+                
+    Wend
+
+    MsgBox "The emails have been generated and are located in this local folder " & path_output_entite_mail, vbInformation, "Generate  mail in local Folder"
+   
+Exit Sub
+
+error_handler_1:
+
+answer = MsgBox("instance of Outlook is already open, a closing and reopening is necessary:" & Chr(13) & Chr(10) & Chr(13) & Chr(10) & "Click on yes to continue and to let the program close and reopen the Outlook application" & Chr(13) & Chr(10) & "Click on no to continue once you have closed it yourself and reopened the outlook application (to save your work in progress)", vbYesNoCancel)
+ 
+  If answer = vbYes Then
+        app.Quit
+        Shell ("OUTLOOK")
+        Call save_emails_folder
+        
+    ElseIf answer = vbNo Then
+        Call save_emails_folder
+  Else
+    Exit Sub
+  End If
+
+Exit Sub
+
+    Application.ScreenUpdating = True
+
+error_handler:
+         
+    error_manager.description = Err.description
+    Err.Number = 1
+    Call error_manager.handle_error(Err)
+    
+End Sub
+
+Sub Send_Mail_Folder()
+
+    Application.ScreenUpdating = False
+
+    Dim app As Outlook.Application
+    Dim msg As Outlook.MailItem
+    Dim ns As Outlook.Namespace
+
+    Dim path_output_entite_mail As String
+    Dim file_range  As String
+    Dim file_dir  As String
+    Dim obj_fFile As Object
+    Dim obj_fso
+    Dim obj_folder
+
+    If debug_mode Then On Error GoTo error_handler:
+    
+    path_output_entite_mail = ws_main.[rng_output_mail]
+
+    file_dir = Dir(path_output_entite_mail & "*.msg")
+    file_range = path_output_entite_mail & file_dir
+
+    Set app = CreateObject("Outlook.Application")
+    Set ns = app.GetNamespace("MAPI")
+       
+    Application.DisplayAlerts = False
+    
+    'Crée instance pour  FileSystemObject
+    Set obj_fso = CreateObject("Scripting.FileSystemObject")
+    
+    'on récupere le chemin
+    Set obj_folder = obj_fso.GetFolder(path_output_entite_mail)
+    
+    On Error GoTo folder_msg
+    
+    For Each obj_fFile In obj_folder.Files
+
+        Set msg = app.Session.OpenSharedItem(obj_fFile)
+        msg.Send
+        
+    Next obj_fFile
+    
+    On Error GoTo 0
+    
+    Set app = Nothing
+    Set msg = Nothing
+    
+    Application.DisplayAlerts = True
+    MsgBox "The emails have been sent ", vbInformation, "Send  mail from local Folder"
+    
+    Application.ScreenUpdating = True
+    
+    Exit Sub
+    
+folder_msg:
+    
+    MsgBox "The emails were not found in the folder, try again with a Mails Output Folder dedicated to .msg mail files without any other type of format"
+    
+    Exit Sub
+    
+error_handler:
+    
+    MsgBox " Error, Only one a instance of Outlook can be open at a time, try to close and reopen the outlook application"
+     
+End Sub
+
+
+
+
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'# mymailer (cls)
+
+
+Public subject As String
+Public mail_to As String
+Public mail_cc As String
+Public header As String
+Public body As String
+Public signature As String
+Public mail_type As String
+Public Sub initialize(ByVal mail_type As String)
+    
+    Me.mail_type = mail_type
+    
+    Call Me.get_mailer_properties
+
+End Sub
+Sub get_mailer_properties()
+    
+    Select Case Me.mail_type
+        Case "rating_outstanding"
+            Call get_rating_outstanding_properties
+        Case "navette"
+            Call get_navette_properties
+        Case "date"
+            Call get_date_properties
+    End Select
+    
+End Sub
+Sub get_rating_outstanding_properties()
+    
+    Me.subject = ws_mail.[rng_mail_subject_ro].value
+    Me.mail_to = ws_mail.[rng_mail_to_ro].value
+    Me.mail_cc = ws_mail.[rng_mail_cc_ro].value
+    Me.header = ws_mail.[rng_header_ro].value '& "<br><br><br>"
+    Me.body = ws_mail.[rng_body_ro].value '& "<br><br><br>"
+    Me.signature = ws_mail.[rng_signature_ro].value '& "<br><br>"
+    
+End Sub
+Sub get_navette_properties()
+    
+    Me.subject = ws_mail.[rng_mail_subject_navette].value
+    Me.mail_to = ws_mail.[rng_mail_to_navette].value
+    Me.mail_cc = ws_mail.[rng_mail_cc_navette].value
+    Me.header = ws_mail.[rng_header_navette].value & "<br><br><br>"
+    Me.body = ws_mail.[rng_body_navette].value & "<br><br><br>"
+    Me.signature = "<br>" & ws_mail.[rng_signature_navette].value & "<br><br>"
+    
+End Sub
+Sub get_date_properties()
+    
+    Me.subject = ws_mail.[rng_mail_subject_date].value
+    Me.mail_to = ws_mail.[rng_mail_to_date].value
+    Me.mail_cc = ws_mail.[rng_mail_cc_date].value
+    Me.header = ws_mail.[rng_header_date].value & "<br><br><br>"
+    Me.body = ws_mail.[rng_body_date].value & "<br><br><br>"
+    Me.signature = "<br>" & ws_mail.[rng_signature_date].value & "<br><br>"
+    
+End Sub
+Public Sub create_email(Optional ByRef attachments_array As Variant)
+
+    Dim OutlookApp As Object
+    Dim Outmail As Object
+    Dim email_core As String
+    Dim my_header As String
+    Dim my_body As String
+    Dim my_signature As String
+    Dim mail_to As String
+    Dim mail_cc As String
+    Dim subject As String
+    Dim validityMailTo As Boolean
+    Dim validityMailCc As Boolean
+    Dim element As Variant
+    Dim temp_ws As Worksheet
+    Dim wb As Workbook
+    
+    On Error GoTo errorhandler
+    
+    Set wb = ThisWorkbook
+    
+    subject = Me.subject
+    mail_to = Me.mail_to
+    mail_cc = Me.mail_cc
+    
+    If mail_to = "" Then
+        Err.Raise 3
+    End If
+    
+    validityMailTo = IsValidEmail(mail_to)
+    
+    If mail_cc <> "" Then
+        validityMailCc = IsValidEmail(mail_cc)
+    Else
+        validityMailCc = True
+    End If
+    
+    If Not validityMailTo Or Not validityMailCc Then Err.Raise 2
+    
+    my_header = Me.header
+    my_body = Me.body
+    my_signature = Me.signature
+    
+    email_core = my_header & my_body
+    
+    If Me.mail_type = "rating_outstanding" Then
+    
+        Set temp_ws = wb.Worksheets(ws_mail.[rng_ws_rating].value)
+        email_core = email_core & RangetoHTML(temp_ws.UsedRange, wb, temp_ws) & "<br><br>"
+        Set temp_ws = wb.Worksheets(ws_mail.[rng_ws_outstanding].value)
+        email_core = email_core & RangetoHTML(temp_ws.UsedRange, wb, temp_ws) & "<br><br>"
+    
+    ElseIf Me.mail_type = "date" Then
+    
+        Set temp_ws = ws_rating_modification
+        email_core = email_core & RangetoHTML(temp_ws.UsedRange, wb, temp_ws) & "<br><br>"
+        
+    End If
+    
+    email_core = email_core & my_signature
+
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set Outmail = OutlookApp.CreateItem(0)
+    
+    With Outmail
+    
+        .To = mail_to
+        If mail_cc <> "" Then .cc = mail_cc
+        .subject = subject
+        .HTMLBody = email_core
+        If Me.mail_type = "navette" Then
+            For Each attachement In attachments_array
+                .Attachments.Add attachement
+            Next
+        End If
+        .Display
+        
+    End With
+  
+errorhandler:
+ 
+    Call Enabled(True)
+    
+    Select Case Err
+    
+        Case Is <> 0
+            MsgBox Err.description, vbCritical
+            
+    End Select
+    
+End Sub
+Private Function IsValidEmail(ByVal sEmailAddress As String) As Boolean
+    'Code from Officetricks
+    'Define variables
+    Dim sEmailPattern As String
+    Dim oRegEx As Object
+    Dim bReturn As Boolean
+    
+    'Use the below regular expressions
+    ' sEmailPattern = "^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$" 'or
+    sEmailPattern = "^([a-zA-Z0-9_\-\.]+)@[a-z0-9-]+(\.[a-z0-9-]+)*(\.[a-z]{2,3})$"
+    
+    'Create Regular Expression Object
+    Set oRegEx = CreateObject("VBScript.RegExp")
+    oRegEx.Global = True
+    oRegEx.IgnoreCase = True
+    oRegEx.Pattern = sEmailPattern
+    bReturn = False
+    
+    'Check if Email match regex pattern
+    If oRegEx.test(sEmailAddress) Then
+        'Debug.Print "Valid Email ('" & sEmailAddress & "')"
+        bReturn = True
+    Else
+        'Debug.Print "Invalid Email('" & sEmailAddress & "')"
+        bReturn = False
+    End If
+
+    'Return validation result
+    IsValidEmail = bReturn
+End Function
+Private Function RangetoHTML(ByRef rng As Range, ByRef TempWB As Workbook, ByRef TempWS As Worksheet) As String
+
+    Dim fso As Object
+    Dim ts As Object
+    Dim TempFile As String
+    Dim Compte
+    
+    Application.ReferenceStyle = xlA1
+
+
+    TempFile = Environ$("temp") & "\" & Format(Now, "dd-mm-yy h-mm-ss") & ".htm"
+
+
+    Compte = TempWS.Index
+    
+    
+    With TempWB.PublishObjects.Add( _
+        SourceType:=xlSourceRange, _
+        FileName:=TempFile, _
+        Sheet:=TempWB.Sheets(Compte).name, _
+        Source:=rng.Address, _
+        HtmlType:=xlHtmlStatic)
+        .Publish (True)
+    End With
+
+    
+    'lit le fichier HTML
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set ts = fso.GetFile(TempFile).OpenAsTextStream(1, -2)
+    RangetoHTML = ts.ReadAll
+    ts.Close
+    RangetoHTML = Replace(RangetoHTML, "align=center x:publishsource=", "align=left x:publishsource=")
+
+    'supprime le fichier html provisoire
+    Kill TempFile
+
+    Set ts = Nothing
+    Set fso = Nothing
+    
+
+End Function
+
+'exemple'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+Sub SendMail()
+'Send automatically an email
+ 
+    'Deactivate
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+     
+    'Initialisation of variable
+    Set WbMacro = ActiveWorkbook
+ 
+    WbMacro.Activate
+     
+    'Fill with right data
+    MailAdressTo = "" 'To
+    MailAdressCc = "" 'Cc
+    MailBody = ""
+    MailSubject = ""
+     
+    'Create a mail
+    Set OutApp = CreateObject("Outlook.Application") 'Create an outlook app
+    Set Outmail = OutApp.CreateItem(0) 'Create the mail
+     
+    With Outmail
+        .SentOnBehalfName = "" 'Address mail used to send the mail
+        .To = MailAdressTo 'Recipients
+        .cc = MailAdressCc 'Recipients in copy
+        .BCC = "" 'Recipients in hide copy
+        .subject = MailSubject 'Subject of the mail
+        .Display 'Display the mail
+        .Send 'If it is written the mail is send automatically
+    End With
+ 
+    'Cleaning variables
+    Set OutApp = Nothing
+    Set Outmail = Nothing
+     
+    'Reactivate at the end
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+     
+End Sub
+
+
+Sub CreateAndSaveMailAsDraft()
+'Save an email as a draft without sending
+ 
+   'Declaration
+    Dim OutApp As Object
+    Dim Outmail As Object
+  
+   'Initialisation
+    Set OutApp = CreateObject("Outlook.Application")
+    Set Outmail = OutApp.CreateItem(0)
+ 
+    With Outmail
+        .body = ""
+        .Attachments.Add ""
+        .subject = ""
+        .To = ""
+        .Save 'to save the mail
+    End With
+ 
+    'Cleaning variables
+    Set OutApp = Nothing
+    Set Outmail = Nothing
+ 
+End Sub
+
+
+
+Sub WriteMailWithAttachFile()
+'Mail with several attachments
+ 
+    'Deactivate
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+     
+    'Initialisation of variable
+    Set WbMacro = ActiveWorkbook
+ 
+    WbMacro.Activate
+     
+    'Create a mail
+    Set OutApp = CreateObject("Outlook.Application")
+    Set Outmail = OutApp.CreateItem(0)
+     
+    With Outmail
+        .SentOnBehalfName = ""
+        .To = ""
+        .cc = ""
+        .BCC = ""
+        .subject = ""
+        .Attachments.Add "C:\Documents\Accounting.xlsx" the attach method with a xlsx file
+        .Attachments.Add "C:\Documents\Finance.pdf" the attach method with a pdf file
+        .Attachments.Add "C:\Documents\Management.docx" the attach method with a docx file
+        .Attachments.Add "C:\Documents\Business.txt" the attach method with a txt file
+        .Display 'Display the mail without sending
+    End With
+ 
+    'Cleaning variables
+    Set OutApp = Nothing
+    Set Outmail = Nothing
+     
+    'Reactivate
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+     
+End Sub
+
+
+Sub WriteMailWithHtml()
+'Layout your email with HTML code
+ 
+    'Deactivate
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+     
+   'Declaration
+    Dim OutApp As Object
+    Dim Outmail As Object
+    Dim MailAdressTo, MailAdressTCc, MailBody, MailSubject As String
+ 
+    'Initialisation
+    Set WbMacro = ActiveWorkbook
+    WbMacro.Activate
+ 
+    MailAdressTo = ""
+    MailAdressTCc = ""
+    MailBody = ""
+    MailSubject = ""
+     
+    'Create a mail
+    Set OutApp = CreateObject("Outlook.Application")
+    Set Outmail = OutApp.CreateItem(0)
+     
+    With Outmail
+        .SentOnBehalfName = "" 'you address mail
+        .To = MailAdressTo 'To
+        .cc = MailAdressCc 'Cc
+        .BCC = "" 'Bcc
+        .subject = "Weather Maps..."
+        .BodyFormat 2 ' HMTL Body Format
+        .HTMLBody = BuildHtmlBody() 'Call the Html function
+        .Display
+    End With
+ 
+    'Cleaning variables
+    Set OutApp = Nothing
+    Set Outmail = Nothing
+     
+    'Reactivate
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+     
+End Sub
+ 
+Function BuildHtmlBody()
+'Function with the format of the mail using HTML code
+     
+    'Declarations of variables
+    Dim html As String
+     
+    'We fill the HTML string variable as we go along
+    'by incrementing it with character strings
+    html = "<!DocType html><html><body>"
+    html = html & "<div style =""font-family:'Segoe UI',Calibri,Arial,Helvetica; font-size: 14px; max-width:768px;"">"
+    html = html & "Dear all, <br /><br />You cannot have a positive life and a negative mind. Joyce Meyer.<br/><br />"
+    html = html & "<B> <U> Quote </B></U><br /><br />"
+    html = html & "<ul><li></li><li></li><li></li></ul>"
+    html = html & "<B><p><font color=green> Author </font></p></B><br /><br />"
+    html = html & "<B><p><font color=gray> Date </font></p></B><br /><br />"
+    html = html & "<table style='border-spacing: 0px; border-style: solid; border-color : #ccc; border-width: 0 0 1px 1px;'>"
+    html = html & "</table></div></body></html>"
+ 
+End Function
+
