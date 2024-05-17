@@ -1,0 +1,340 @@
+Sub SaveAttachmentsFromEmails()
+    Dim OutlookApp As Object
+    Dim OutlookNamespace As Object
+    Dim Inbox As Object
+    Dim SubFolder As Object
+    Dim MailItem As Object
+    Dim Attachment As Object
+    Dim DateFilter As String
+    Dim SubjectKeyword As String
+    Dim BodyKeyword As String
+    Dim FilePath As String
+    Dim Filter As String
+    Dim i As Long
+    
+    ' Initialiser les objets Outlook
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookNamespace = OutlookApp.GetNamespace("MAPI")
+    Set Inbox = OutlookNamespace.GetDefaultFolder(6) ' 6 correspond à la boîte de réception
+
+    ' Paramètres de filtrage
+    DateFilter = "2024-05-15" ' Exemple de date
+    SubjectKeyword = "Projet" ' Exemple de mot clé dans l'intitulé
+    BodyKeyword = "important" ' Exemple de mot clé dans le corps de l'email
+    FilePath = "C:\Users\VotreNomUtilisateur\Documents\Attachments\" ' Chemin du dossier de sauvegarde
+
+    ' Créer le filtre de recherche
+    Filter = "[ReceivedTime] >= '" & DateFilter & "' AND [Subject] LIKE '%" & SubjectKeyword & "%'"
+    
+    ' Boucle à travers les emails dans le dossier
+    For Each SubFolder In Inbox.Folders
+        For i = 1 To SubFolder.Items.Count
+            If TypeName(SubFolder.Items(i)) = "MailItem" Then
+                Set MailItem = SubFolder.Items(i)
+                If MailItem.ReceivedTime >= DateFilter Then
+                    If InStr(1, MailItem.Subject, SubjectKeyword, vbTextCompare) > 0 And InStr(1, MailItem.Body, BodyKeyword, vbTextCompare) > 0 Then
+                        ' Sauvegarder les pièces jointes
+                        If MailItem.Attachments.Count > 0 Then
+                            For Each Attachment In MailItem.Attachments
+                                Attachment.SaveAsFile FilePath & Attachment.FileName
+                            Next Attachment
+                        End If
+                    End If
+                End If
+            End If
+        Next i
+    Next SubFolder
+
+    ' Libérer la mémoire
+    Set OutlookApp = Nothing
+    Set OutlookNamespace = Nothing
+    Set Inbox = Nothing
+    Set SubFolder = Nothing
+    Set MailItem = Nothing
+    Set Attachment = Nothing
+End Sub
+
+Sub CreateMonthlyFolders()
+    Dim BasePath As String
+    Dim StartDate As Date
+    Dim YearPart As String
+    Dim MonthPart As String
+    Dim FolderName As String
+    Dim i As Integer
+    Dim CurrentDate As Date
+
+    ' Définir le chemin de base où les dossiers seront créés
+    BasePath = "C:\Users\VotreNomUtilisateur\Documents\MonthlyFolders\" ' Remplacez par votre chemin de base
+
+    ' Définir la date de départ
+    StartDate = DateValue("2024-05-01") ' Remplacez par la date de départ souhaitée
+
+    ' Créer les dossiers pour chaque mois de l'année
+    For i = 0 To 11
+        ' Calculer la date actuelle en ajoutant i mois à la date de départ
+        CurrentDate = DateAdd("m", i, StartDate)
+        
+        ' Extraire l'année et le mois de la date actuelle
+        YearPart = Format(CurrentDate, "yyyy")
+        MonthPart = Format(CurrentDate, "mm")
+        
+        ' Construire le nom du dossier
+        FolderName = BasePath & YearPart & "-" & MonthPart
+        
+        ' Créer le dossier s'il n'existe pas déjà
+        If Dir(FolderName, vbDirectory) = "" Then
+            MkDir FolderName
+        End If
+    Next i
+End Sub
+
+Sub SaveAttachmentsToMonthlyFolders()
+    Dim OutlookApp As Object
+    Dim OutlookNamespace As Object
+    Dim Inbox As Object
+    Dim MailItem As Object
+    Dim Attachment As Object
+    Dim SubjectKeyword As String
+    Dim BodyKeyword As String
+    Dim IncludeBodyKeyword As Boolean
+    Dim BasePath As String
+    Dim i As Long
+    Dim ReceivedDate As Date
+    Dim YearPart As String
+    Dim MonthPart As String
+    Dim FolderPath As String
+    Dim SubFolder As Object
+
+    ' Initialiser les objets Outlook
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookNamespace = OutlookApp.GetNamespace("MAPI")
+    Set Inbox = OutlookNamespace.GetDefaultFolder(6) ' 6 correspond à la boîte de réception
+
+    ' Paramètres de filtrage
+    SubjectKeyword = "Projet" ' Exemple de mot clé dans l'intitulé
+    BodyKeyword = "important" ' Exemple de mot clé dans le corps de l'email (optionnel)
+    IncludeBodyKeyword = False ' Mettre à True pour filtrer aussi par mot clé dans le corps de l'email
+    BasePath = "C:\Users\VotreNomUtilisateur\Documents\Attachments\" ' Chemin du dossier de base
+
+    ' Boucle à travers les emails dans le dossier
+    For Each SubFolder In Inbox.Folders
+        For i = 1 To SubFolder.Items.Count
+            If TypeName(SubFolder.Items(i)) = "MailItem" Then
+                Set MailItem = SubFolder.Items(i)
+                If InStr(1, MailItem.Subject, SubjectKeyword, vbTextCompare) > 0 Then
+                    If Not IncludeBodyKeyword Or (IncludeBodyKeyword And InStr(1, MailItem.Body, BodyKeyword, vbTextCompare) > 0) Then
+                        ' Extraire la date de réception
+                        ReceivedDate = MailItem.ReceivedTime
+                        
+                        ' Extraire l'année et le mois de la date de réception
+                        YearPart = Format(ReceivedDate, "yyyy")
+                        MonthPart = Format(ReceivedDate, "mm")
+                        
+                        ' Construire le chemin du dossier
+                        FolderPath = BasePath & YearPart & "-" & MonthPart & "\"
+                        
+                        ' Créer le dossier s'il n'existe pas déjà
+                        If Dir(FolderPath, vbDirectory) = "" Then
+                            MkDir FolderPath
+                        End If
+                        
+                        ' Sauvegarder les pièces jointes
+                        If MailItem.Attachments.Count > 0 Then
+                            For Each Attachment In MailItem.Attachments
+                                Attachment.SaveAsFile FolderPath & Attachment.FileName
+                            Next Attachment
+                        End If
+                    End If
+                End If
+            End If
+        Next i
+    Next SubFolder
+
+    ' Libérer la mémoire
+    Set OutlookApp = Nothing
+    Set OutlookNamespace = Nothing
+    Set Inbox = Nothing
+    Set MailItem = Nothing
+    Set Attachment = Nothing
+End Sub
+
+
+[TOC]
+## Lister les fichiers contenus dans un dossier (et sous-dossiers)
+ 
+```
+Function fnListFiles(strDir As String, Optional SubDir As Boolean = False) As String
+    Dim intFile As Integer
+    intFile = 0
+    With Application.FileSearch
+        .LookIn = strDir
+        .SearchSubFolders = (SubDir = True)
+        .FileName = "*.*"
+        If .Execute > 0 Then
+            For intFile = 1 To .FoundFiles.Count
+                fnListFiles = IIf(fnListFiles = "", .FoundFiles(intFile), _
+                                  fnListFiles & ";" & .FoundFiles(intFile))
+            Next intFile
+        End If
+    End With
+End Function
+```
+
+## Lister les sous-dossiers
+
+```
+Function fnGetSubFoldersInDirectory(sPath As String) As String
+    Dim fso As Object, Directory As Object
+    Dim SubFolders As Object, Folders As Object
+    Dim sTmp As String
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set Directory = fso.GetFolder(sPath)
+    Set SubFolders = Directory.SubFolders
+    
+    For Each Folders In SubFolders
+        sTmp = sTmp & Folders.Name & ";"
+    Next Folders
+    
+    If sTmp <> "" Then
+        sTmp = Left(sTmp, Len(sTmp) - 1) & ""
+    End If
+    
+    fnGetSubFoldersInDirectory = sTmp
+    
+    Set Folders = Nothing
+    Set SubFolders = Nothing
+    Set fso = Nothing
+    Set Directory = Nothing
+End Function
+```
+ 
+ 
+ ## **Loop Through all Sheets in all Files in a Folder**
+```
+Sub Theloopofloops()
+Dim wbk As Workbook
+Dim Filename As String
+Dim path As String
+Dim rCell As Range
+Dim rRng As Range
+Dim wsO As Worksheet
+Dim sheet As Worksheet
+ path = "pathtofile(s)" & "\"
+ Filename = Dir(path & "*.xl??")
+Set wsO = ThisWorkbook.Sheets("Sheet1") 'included in case you need to differentiate_
+ between workbooks i.e currently opened workbook vs workbook containing code
+Do While Len(Filename) > 0
+ DoEvents
+ Set wbk = Workbooks.Open(path & Filename, True, True)
+ For Each sheet In ActiveWorkbook.Worksheets 'this needs to be adjusted for specifiying
+sheets. Repeat loop for each sheet so thats on a per sheet basis
+ Set rRng = sheet.Range("a1:a1000") 'OBV needs to be changed
+ For Each rCell In rRng.Cells
+ If rCell <> "" And rCell.Value <> vbNullString And rCell.Value <> 0 Then
+ 'code that does stuff
+ End If
+ Next rCell
+ Next sheet
+ wbk.Close False
+ Filename = Dir
+Loop
+End Sub
+```
+
+## Rechercher un répertoire et obtenir son chemin d'accès
+
+Placez la fonction suivante dans un module général, onglet Module et que vous nommerez "mod_RechercheRepertoire" par exemple.
+**Remarque :**
+Le chemin retourné, est celui qui mène au premier répertoire trouvé.
+Si donc vous cherchez le répertoire "Test" dont il existe deux exemplaires, vous obtiendrez par exemple "C:\Niveau1\Test" et jamais "C:\Niveau1\Niveau2\Test".
+```
+Function fnSearchFolder(StartPath As String, FolderName As String)
+    '//
+    '//     Syntaxe :
+    '//     Chemin = fnSearchFolder("C:\","MonRepertoire")
+    '//     Chemin = fnSearchFolder("D:\Images","MonRepertoire")
+    '//
+    On Error GoTo Err_SearchFolder
+    Dim boFound As Boolean
+    Dim i As Integer, j As Integer, MaxRep As Integer
+    Dim Path2Folder() As String
+    Dim sFind As String
+    Const vbDir As Integer = vbDirectory
+
+    If Right(StartPath, 1) <> "/" Then StartPath = StartPath & "/"
+    FolderName = Replace(FolderName, "/", "")
+    i = 1: j = 0: MaxRep = 0: boFound = False
+    ReDim Path2Folder(100)
+    Path2Folder(0) = StartPath
+    sFind = Dir(StartPath, vbDir)
+    Do While (Path2Folder(j) <> "") And (boFound = False)
+        Do While (sFind <> "") And (boFound = False)
+            If sFind <> "." And sFind <> ".." Then
+                If (GetAttr(Path2Folder(j) & sFind) And vbDir) = vbDir Then
+                    If i > (MaxRep - 5) Then
+                        MaxRep = i + 100
+                        ReDim Preserve Path2Folder(MaxRep)
+                    End If
+                    Path2Folder(i) = Path2Folder(j) & sFind & "/"
+                    If Right(Path2Folder(i), Len(FolderName) + 2) = _
+                       ("/" & FolderName & "/") Then
+                        fnSearchFolder = Path2Folder(i)
+                        boFound = True
+                    End If
+                    i = i + 1
+                End If
+            End If
+            sFind = Dir
+        Loop
+        j = j + 1
+        sFind = Dir(Path2Folder(j), vbDir)
+    Loop
+
+Exit_SearchFolder:
+    Exit Function
+Err_SearchFolder:
+    If Err.Number <> 52 Then
+        MsgBox Err.Number & " " & Err.Description
+    End If
+    Resume Exit_SearchFolder
+End Function
+```
+
+## Mémoriser le contenu d'un répertoire dans une table
+
+Pour cela, on peut utiliser la fonction suivante qui sauvera le nom des fichiers ainsi que leur taille. Optionnellement, on peut décider de sauver ou non, tous les sous-répertoires et leurs fichiers.
+On aura au préalable créé une table composée d'un champ numérique (numéroauto en clé primaire), un champ texte (255 caractères) et un champ numérique (long entier).
+```
+Function Dir2Table(strDir As String, strTable As String, _
+                   strFieldName As String, strFieldLength As String, _
+                   Optional boSubFolder As Boolean = False)
+
+    Dim intFile As Integer
+    Dim strFile As String
+    Dim lngSize As Long
+
+    intFile = 0: strFile = ""
+
+    With Application.FileSearch
+        .SearchSubFolders = boSubFolder
+        .FileType = msoFileTypeAllFiles
+        .LookIn = strDir
+        If .Execute(SortBy:=msoSortBySize, _
+                    SortOrder:=msoSortOrderDescending) > 0 Then
+            For intFile = 1 To .FoundFiles.Count
+                strFile = .FoundFiles(intFile)
+                '/ Pour des ko, on divisera par 1024
+                'lngSize = FileLen(strFile) / 1024
+                lngSize = FileLen(strFile)
+                strFile = Mid(strFile, InStrRev(strFile, Chr(92)) + 1)
+                CurrentDb.Execute "INSERT INTO [" & strTable & "] " _
+                                  & "([" & strFieldName & "]," _
+                                  & "[" & strFieldLength & "])" _
+                                  & "SELECT """ & strFile & """," _
+                                  & lngSize & ";"
+            Next
+        End If
+    End With
+End Function
+```
