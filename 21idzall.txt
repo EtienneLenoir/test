@@ -1,0 +1,262 @@
+Sub PrepareAndSendEmail()
+    Dim ws1 As Worksheet
+    Dim ws2 As Worksheet
+    Dim newWorkbook As Workbook
+    Dim tempFilePath As String
+    Dim tempFileName As String
+    Dim tempFileFullPath As String
+    Dim outlookApp As Object
+    Dim outlookMail As Object
+    Dim mailRecipient As String
+    Dim mailSubject As String
+
+    ' Définir les feuilles à copier
+    Set ws1 = ThisWorkbook.Sheets("résultats") ' Remplacez "résultats" par le nom de votre première feuille
+    Set ws2 = ThisWorkbook.Sheets("NNS") ' Remplacez "NNS" par le nom de votre deuxième feuille
+
+    ' Définir le chemin et le nom du fichier temporaire
+    tempFilePath = Environ("TEMP") & "\"
+    tempFileName = "FeuillesTemporaires.xlsx"
+    tempFileFullPath = tempFilePath & tempFileName
+
+    ' Copier les feuilles dans un nouveau classeur
+    Set newWorkbook = Workbooks.Add(xlWBATWorksheet)
+    ws1.Copy Before:=newWorkbook.Sheets(1)
+    ws2.Copy Before:=newWorkbook.Sheets(1)
+
+    ' Enregistrer le nouveau classeur en tant que fichier .xlsx
+    newWorkbook.SaveAs Filename:=tempFileFullPath, FileFormat:=xlOpenXMLWorkbook
+    newWorkbook.Close SaveChanges:=False
+
+    ' Définir le destinataire et le sujet du mail
+    mailRecipient = "destinataire@example.com" ' Remplacez par l'adresse email du destinataire
+    mailSubject = "Sujet de l'email" ' Remplacez par le sujet de votre email
+
+    ' Créer une instance de l'application Outlook
+    Set outlookApp = CreateObject("Outlook.Application")
+    Set outlookMail = outlookApp.CreateItem(0) ' 0 = olMailItem
+
+    ' Préparer le mail
+    With outlookMail
+        .To = mailRecipient
+        .Subject = mailSubject
+        .Body = "Bonjour," & vbCrLf & vbCrLf & "Veuillez trouver en pièce jointe les feuilles demandées." & vbCrLf & vbCrLf & "Cordialement,"
+        .Attachments.Add tempFileFullPath
+        .Display ' Affiche le mail pour vérification avant envoi
+    End With
+
+    ' Libérer les objets
+    Set outlookMail = Nothing
+    Set outlookApp = Nothing
+
+    ' Supprimer le fichier temporaire
+    Kill tempFileFullPath
+End Sub
+
+
+Sub CopierFeuillesEtEnvoyerMail()
+
+    Dim wbSource As Workbook
+    Dim wbDestination As Workbook
+    Dim wsNNS As Worksheet
+    Dim wsResultats As Worksheet
+    Dim newFilePath As String
+    Dim OutApp As Object
+    Dim OutMail As Object
+    
+    ' Ouvrir le fichier en cours
+    Set wbSource = ThisWorkbook
+    
+    ' Créer un nouveau classeur Excel
+    Set wbDestination = Workbooks.Add
+    
+    ' Copier les feuilles "NNS" et "résultats" dans le nouveau classeur
+    wbSource.Sheets("NNS").Copy Before:=wbDestination.Sheets(1)
+    wbSource.Sheets("résultats").Copy After:=wbDestination.Sheets(1)
+    
+    ' Enregistrer le nouveau fichier
+    newFilePath = ThisWorkbook.Path & "\" & "NouveauFichier.xlsx"
+    wbDestination.SaveAs newFilePath
+    wbDestination.Close False
+    
+    ' Créer un nouvel e-mail
+    Set OutApp = CreateObject("Outlook.Application")
+    Set OutMail = OutApp.CreateItem(0)
+    
+    ' Ajouter le fichier en pièce jointe
+    With OutMail
+        .to = "destinataire@example.com"
+        .Subject = "Nouveau fichier en pièce jointe"
+        .Body = "Bonjour, veuillez trouver ci-joint le nouveau fichier."
+        .Attachments.Add newFilePath
+        .Display ' Utilisez .Send si vous voulez envoyer directement sans afficher le mail
+    End With
+    
+    ' Nettoyer les objets Outlook
+    Set OutMail = Nothing
+    Set OutApp = Nothing
+
+End Sub
+
+'''''''''''''''''''''''''''''''''''''
+Pour optimiser le code VBA, nous pouvons éviter d'ouvrir un nouveau classeur Excel pour copier les feuilles. Au lieu de cela, nous pouvons créer un classeur temporaire en mémoire, copier les feuilles dans ce classeur, enregistrer ce classeur temporaire sur le disque, puis le joindre au courrier électronique. Cela réduit le nombre d'opérations de lecture/écriture sur le disque, ce qui peut accélérer le processus. Voici le code optimisé :
+
+Sub CopierFeuillesEtEnvoyerMail()
+
+    Dim wbSource As Workbook
+    Dim wbTemp As Workbook
+    Dim wsNNS As Worksheet
+    Dim wsResultats As Worksheet
+    Dim newFilePath As String
+    Dim OutApp As Object
+    Dim OutMail As Object
+    
+    ' Ouvrir le fichier en cours
+    Set wbSource = ThisWorkbook
+    
+    ' Créer un nouveau classeur temporaire en mémoire
+    Set wbTemp = Workbooks.Add
+    
+    ' Copier les feuilles "NNS" et "résultats" dans le classeur temporaire
+    Set wsNNS = wbSource.Sheets("NNS")
+    Set wsResultats = wbSource.Sheets("résultats")
+    wsNNS.Copy Before:=wbTemp.Sheets(1)
+    wsResultats.Copy After:=wbTemp.Sheets(1)
+    
+    ' Enregistrer le classeur temporaire sur le disque
+    newFilePath = Environ("Temp") & "\" & "NouveauFichier.xlsx"
+    wbTemp.SaveAs newFilePath
+    wbTemp.Close False
+    
+    ' Créer un nouvel e-mail
+    Set OutApp = CreateObject("Outlook.Application")
+    Set OutMail = OutApp.CreateItem(0)
+    
+    ' Ajouter le fichier en pièce jointe
+    With OutMail
+        .to = "destinataire@example.com"
+        .Subject = "Nouveau fichier en pièce jointe"
+        .Body = "Bonjour, veuillez trouver ci-joint le nouveau fichier."
+        .Attachments.Add newFilePath
+        .Display ' Utilisez .Send si vous voulez envoyer directement sans afficher le mail
+    End With
+    
+    ' Nettoyer les objets Outlook
+    Set OutMail = Nothing
+    Set OutApp = Nothing
+
+End Sub
+
+
+'''''''''''''''''''''''''''
+
+
+
+Pour créer une liste déroulante dans la feuille "Résultat" qui prend ses valeurs de la feuille "Param", voici comment vous pouvez procéder :
+
+Étape 1: Créer une liste déroulante avec la validation des données
+Sélectionnez la cellule de la feuille "Résultat" où vous souhaitez créer la liste déroulante (par exemple, B1).
+Allez dans Données > Validation des données.
+Dans l'onglet Options, choisissez Liste dans le menu déroulant Autoriser.
+Dans le champ Source, entrez la référence de la plage de cellules de la feuille "Param" contenant les éléments de votre liste (par exemple, =Param!$A$1:$A$10).
+Étape 2: Mettre à jour la liste déroulante via VBA
+Pour que la liste déroulante se mette à jour dynamiquement en fonction des valeurs de la feuille "Param", vous pouvez utiliser VBA pour ajuster la validation des données. Voici un exemple de code VBA pour cela :
+
+Appuyez sur Alt + F11 pour ouvrir l'éditeur VBA.
+Insérez un nouveau module en allant dans Insertion > Module.
+Ajoutez le code suivant :
+
+Sub UpdateDropdown()
+    Dim wsParam As Worksheet
+    Dim wsResult As Worksheet
+    Dim rng As Range
+    Dim lastRow As Long
+
+    ' Définir les feuilles de calcul
+    Set wsParam = ThisWorkbook.Sheets("Param")
+    Set wsResult = ThisWorkbook.Sheets("Résultat")
+
+    ' Trouver la dernière ligne utilisée dans la colonne A de la feuille Param
+    lastRow = wsParam.Cells(wsParam.Rows.Count, "A").End(xlUp).Row
+
+    ' Définir la plage contenant les valeurs de la liste déroulante
+    Set rng = wsParam.Range("A1:A" & lastRow)
+
+    ' Mettre à jour la validation des données de la cellule B1 sur la feuille Résultat
+    With wsResult.Range("B1").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:= _
+        xlBetween, Formula1:="=" & wsParam.Name & "!" & rng.Address
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .ShowInput = True
+        .ShowError = True
+    End With
+End Sub
+
+
+Étape 3: Automatiser la mise à jour de la liste déroulante
+Pour automatiser la mise à jour de la liste déroulante chaque fois que des modifications sont apportées à la feuille "Param", vous pouvez utiliser les événements de la feuille de calcul. Ajoutez le code suivant dans le module de la feuille de calcul "Param":
+
+Dans l'éditeur VBA, double-cliquez sur Sheet Param dans le volet de gauche.
+Ajoutez ce code :
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If Not Intersect(Target, Me.Columns("A")) Is Nothing Then
+        Call UpdateDropdown
+    End If
+End Sub
+
+
+Vous pouvez également ajouter le code pour mettre à jour la liste déroulante lorsque la feuille "Résultat" est activée. Ajoutez ce code dans le module de la feuille de calcul "Résultat":
+
+Dans l'éditeur VBA, double-cliquez sur Sheet Résultat dans le volet de gauche.
+Ajoutez ce code :
+
+Private Sub Worksheet_Activate()
+    Call UpdateDropdown
+End Sub
+
+
+Explication
+UpdateDropdown : Cette procédure met à jour la liste déroulante dans la cellule B1 de la feuille "Résultat" en fonction des valeurs actuelles de la colonne A de la feuille "Param".
+Worksheet_Change : Cet événement est déclenché chaque fois qu'une modification est apportée à la colonne A de la feuille "Param", ce qui appelle la procédure UpdateDropdown pour mettre à jour la liste déroulante.
+Worksheet_Activate : Cet événement est déclenché chaque fois que la feuille "Résultat" est activée, ce qui appelle également UpdateDropdown pour garantir que la liste déroulante est à jour
+
+
+Sub SauvegarderHistorique()
+    Dim cheminDossier As String
+    Dim nomFichier As String
+    Dim nouvelleDate As String
+    
+    ' Chemin du dossier où le fichier sera sauvegardé
+    cheminDossier = "C:\Chemin\Vers\Votre\Dossier\" ' Remplacez par le chemin réel
+    
+    ' Assurez-vous que le chemin se termine par un backslash
+    If Right(cheminDossier, 1) <> "\" Then
+        cheminDossier = cheminDossier & "\"
+    End If
+    
+    ' Format de la date pour l'ajouter au nom du fichier
+    nouvelleDate = Format(Now, "yyyy-mm-dd_hhmmss")
+    
+    ' Nom du fichier actuel sans l'extension
+    nomFichier = ThisWorkbook.Name
+    If InStrRev(nomFichier, ".") > 0 Then
+        nomFichier = Left(nomFichier, InStrRev(nomFichier, ".") - 1)
+    End If
+    
+    ' Nouveau nom de fichier avec la date et l'extension .xlsx
+    nomFichier = nomFichier & "_" & nouvelleDate & ".xlsx"
+    
+    ' Chemin complet du fichier de sauvegarde
+    cheminComplet = cheminDossier & nomFichier
+    
+    ' Sauvegarder le fichier en cours sous un nouveau nom dans le dossier spécifié
+    ThisWorkbook.SaveCopyAs cheminComplet
+    
+    ' Message de confirmation
+    MsgBox "Le fichier a été sauvegardé sous : " & cheminComplet, vbInformation
+End Sub
+
+
