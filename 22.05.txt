@@ -1,0 +1,393 @@
+http://mikejuniperhill.blogspot.com/2013/06/bloomberg-v3com-api-wrapper-update-for.html
+
+
+
+http://mikejuniperhill.blogspot.com/2013/08/bloomberg-v3com-api-wrapper-update-2.html
+
+http://mikejuniperhill.blogspot.com/2014/03/using-vba-bcom-wrapper-to-retrieve.html
+
+
+http://mikejuniperhill.blogspot.com/2014/08/
+
+http://mikejuniperhill.blogspot.com/2014/01/copula-implementation-in-vba.html
+
+http://mikejuniperhill.blogspot.com/2014/01/pricing-equity-basket-option-with-monte.html
+
+Sub BqlQueryExampleDirectConversion()
+    ' Déclaration des variables
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+    
+    ' Initialisation de la session Bloomberg
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+    
+    ' Création de la requête BQL
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+    
+    ' Exemple de requête BQL pour obtenir le PX_LAST converti en EUR
+    Dim bqlQuery As String
+    bqlQuery = "GET(QUOTE('AAPL US Equity'), PX_LAST * FX(EUR)) AS PX_LAST_EUR"
+    
+    ' Définir la requête BQL
+    request.Set("expression", bqlQuery)
+    
+    ' Envoi de la requête et réception de la réponse
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+    
+    ' Attente de la réponse
+    Set response = session.NextEvent()
+    
+    ' Traitement de la réponse
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+    Dim pxLastEur As Double
+    
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+            
+            ' Extraire le prix de clôture converti en EUR
+            pxLastEur = data(0)
+            
+            ' Affichage des données dans la première cellule disponible de la feuille active
+            Range("A1").Value = "PX_LAST (EUR):"
+            Range("B1").Value = pxLastEur
+        Next msg
+    Next ev
+    
+    ' Fermeture de la session
+    session.Stop()
+End Sub
+
+
+Sub BqlQueryVolatilityQuantile()
+    ' Déclaration des variables
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    ' Initialisation de la session Bloomberg
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    ' Création de la requête BQL
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Exemple de requête BQL pour obtenir la volatilité moyenne sur 30 jours et le quantile de 5%
+    Dim bqlQuery As String
+    bqlQuery = "GET(QUOTE('AAPL US Equity'), " & _
+               "VOLATILITY(30, 'DAILY', 'QUOTED') AS VOL_30D, " & _
+               "PERCENTILE(VOLATILITY(30, 'DAILY', 'QUOTED'), 0.05) AS VOL_30D_5PCT)"
+
+    ' Définir la requête BQL
+    request.Set("expression", bqlQuery)
+
+    ' Envoi de la requête et réception de la réponse
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    ' Attente de la réponse
+    Set response = session.NextEvent()
+
+    ' Traitement de la réponse
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+    Dim vol30d As Double
+    Dim vol30d5pct As Double
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Extraire la volatilité moyenne sur 30 jours et le quantile de 5%
+            vol30d = data(0)
+            vol30d5pct = data(1)
+
+            ' Affichage des données dans la première cellule disponible de la feuille active
+            Range("A1").Value = "Volatility 30D:"
+            Range("B1").Value = vol30d
+            Range("A2").Value = "Volatility 30D 5% Quantile:"
+            Range("B2").Value = vol30d5pct
+        Next msg
+    Next ev
+
+    ' Fermeture de la session
+    session.Stop()
+End Sub
+
+# 1. Obtenir les prix historiques
+
+
+Sub BqlQueryHistoricalPrices()
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Requête BQL pour obtenir les prix de clôture historiques
+    Dim bqlQuery As String
+    bqlQuery = "GET(DATA('AAPL US Equity', 'PX_LAST', '2023-01-01', '2023-12-31', 'DAILY'))"
+    
+    request.Set("expression", bqlQuery)
+
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    Set response = session.NextEvent()
+
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Affichage des données dans Excel
+            Dim i As Integer
+            For i = LBound(data) To UBound(data)
+                Range("A1").Offset(i, 0).Value = data(i)(0) ' Date
+                Range("A1").Offset(i, 1).Value = data(i)(1) ' PX_LAST
+            Next i
+        Next msg
+    Next ev
+
+    session.Stop()
+End Sub
+
+
+2. Obtenir des ratios financiers
+
+Sub BqlQueryFinancialRatios()
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Requête BQL pour obtenir les ratios financiers
+    Dim bqlQuery As String
+    bqlQuery = "GET(QUOTE('AAPL US Equity'), 'PE_RATIO', 'PX_TO_BOOK_RATIO')"
+    
+    request.Set("expression", bqlQuery)
+
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    Set response = session.NextEvent()
+
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Affichage des données dans Excel
+            Range("A1").Value = "PE_RATIO:"
+            Range("B1").Value = data(0)
+            Range("A2").Value = "PX_TO_BOOK_RATIO:"
+            Range("B2").Value = data(1)
+        Next msg
+    Next ev
+
+    session.Stop()
+End Sub
+
+3. Obtenir des informations de dividendes
+
+Sub BqlQueryDividendInfo()
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Requête BQL pour obtenir les informations de dividendes
+    Dim bqlQuery As String
+    bqlQuery = "GET(QUOTE('AAPL US Equity'), 'DIVIDEND_YIELD', 'DIVIDEND_PER_SHARE')"
+    
+    request.Set("expression", bqlQuery)
+
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    Set response = session.NextEvent()
+
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Affichage des données dans Excel
+            Range("A1").Value = "DIVIDEND_YIELD:"
+            Range("B1").Value = data(0)
+            Range("A2").Value = "DIVIDEND_PER_SHARE:"
+            Range("B2").Value = data(1)
+        Next msg
+    Next ev
+
+    session.Stop()
+End Sub
+
+
+4. Obtenir les informations sur la capitalisation boursière
+Voici un exemple pour obtenir la capitalisation boursière d'une entreprise :
+
+Sub BqlQueryMarketCapitalization()
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Requête BQL pour obtenir la capitalisation boursière
+    Dim bqlQuery As String
+    bqlQuery = "GET(QUOTE('AAPL US Equity'), 'CUR_MKT_CAP')"
+    
+    request.Set("expression", bqlQuery)
+
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    Set response = session.NextEvent()
+
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Affichage des données dans Excel
+            Range("A1").Value = "CUR_MKT_CAP:"
+            Range("B1").Value = data(0)
+        Next msg
+    Next ev
+
+    session.Stop()
+End Sub
+
+
+
+# =BQL("IBM US Equity","avg(round(dropna(PX_LAST),4))","DATES=RANGE(2017-01-01,2017-12-31)")
+
+
+Sub BqlQueryAveragePxLast()
+    ' Déclaration des variables
+    Dim session As Object
+    Dim request As Object
+    Dim service As Object
+    Dim response As Object
+
+    ' Initialisation de la session Bloomberg
+    Set session = CreateObject("blpapicom.Session")
+    session.Start()
+    session.OpenService("//blp/bql")
+
+    ' Création de la requête BQL
+    Set service = session.GetService("//blp/bql")
+    Set request = service.CreateRequest("bql")
+
+    ' Exemple de requête BQL pour obtenir la moyenne des prix de clôture arrondis sans valeurs nulles
+    Dim bqlQuery As String
+    bqlQuery = "avg(round(dropna(PX_LAST),4)) WHERE DATES=RANGE(2017-01-01,2017-12-31)"
+
+    ' Définir la requête BQL
+    request.Set("securities", "IBM US Equity")
+    request.Set("expression", bqlQuery)
+
+    ' Envoi de la requête et réception de la réponse
+    Dim cid As Long
+    cid = session.SendRequest(request, Nothing)
+
+    ' Attente de la réponse
+    Set response = session.NextEvent()
+
+    ' Traitement de la réponse
+    Dim ev As Object
+    Dim msg As Object
+    Dim elements As Object
+    Dim dataElement As Object
+    Dim data As Variant
+
+    For Each ev In response
+        For Each msg In ev.Messages
+            Set elements = msg.Elements
+            Set dataElement = elements.GetElement("data")
+            data = dataElement.Value
+
+            ' Affichage de la moyenne dans la première cellule disponible de la feuille active
+            Range("A1").Value = "Average PX_LAST (Rounded):"
+            Range("B1").Value = data(0)
+        Next msg
+    Next ev
+
+    ' Fermeture de la session
+    session.Stop()
+End Sub
