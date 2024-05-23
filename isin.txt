@@ -1,0 +1,46 @@
+Function IsValidISIN(isin As String) As Boolean
+    Dim i As Integer
+    Dim checkSum As Integer
+    Dim checkDigit As Integer
+    Dim isinLength As Integer
+    Dim transformedISIN As String
+    Dim numChar As String
+    Dim sum As Integer
+    
+    ' Check if ISIN length is exactly 12 characters
+    isinLength = Len(isin)
+    If isinLength <> 12 Then
+        IsValidISIN = False
+        Exit Function
+    End If
+    
+    ' Transform ISIN to digits string
+    transformedISIN = ""
+    For i = 1 To isinLength
+        numChar = Mid(isin, i, 1)
+        If IsNumeric(numChar) Then
+            transformedISIN = transformedISIN & numChar
+        ElseIf Asc(numChar) >= 65 And Asc(numChar) <= 90 Then ' A-Z
+            transformedISIN = transformedISIN & (Asc(numChar) - 55)
+        Else
+            IsValidISIN = False
+            Exit Function
+        End If
+    Next i
+    
+    ' Double every second digit from right to left
+    sum = 0
+    For i = Len(transformedISIN) To 1 Step -1
+        numChar = Mid(transformedISIN, i, 1)
+        If (Len(transformedISIN) - i) Mod 2 = 0 Then
+            numChar = Val(numChar) * 2
+        End If
+        sum = sum + Int(numChar / 10) + (numChar Mod 10)
+    Next i
+    
+    ' Calculate check digit
+    checkDigit = (10 - (sum Mod 10)) Mod 10
+    
+    ' Compare calculated check digit with the last digit of the ISIN
+    IsValidISIN = (checkDigit = Val(Right(isin, 1)))
+End Function
