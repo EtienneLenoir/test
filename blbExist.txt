@@ -1,0 +1,44 @@
+Sub ManageBloombergReference()
+    Dim bbConn As Object
+    Dim ref As Object
+    Dim refExists As Boolean
+    Dim refName As String
+    refName = "Bloomberg API Type Library"
+    
+    ' Vérifier si la référence Bloomberg est déjà ajoutée
+    refExists = False
+    For Each ref In ThisWorkbook.VBProject.References
+        If ref.Name = "blpapicom" Then
+            refExists = True
+            Exit For
+        End If
+    Next ref
+    
+    On Error Resume Next
+    ' Essayer de créer un objet Bloomberg pour vérifier la connexion
+    Set bbConn = CreateObject("Bloomberg.Application")
+    
+    If Not bbConn Is Nothing Then
+        ' Si la connexion Bloomberg existe
+        If Not refExists Then
+            ' Ajouter la référence Bloomberg si elle n'est pas déjà ajoutée
+            ThisWorkbook.VBProject.References.AddFromFile "C:\Chemin\Vers\Bloomberg\API\blpapicom.dll"
+            MsgBox "Référence Bloomberg API activée."
+        Else
+            MsgBox "Référence Bloomberg API déjà activée."
+        End If
+    Else
+        ' Si la connexion Bloomberg n'existe pas
+        If refExists Then
+            ' Supprimer la référence Bloomberg si elle existe
+            ThisWorkbook.VBProject.References.Remove ref
+            MsgBox "Référence Bloomberg API désactivée."
+        Else
+            MsgBox "Référence Bloomberg API déjà désactivée."
+        End If
+    End If
+    
+    On Error GoTo 0
+    ' Libérer l'objet Bloomberg
+    Set bbConn = Nothing
+End Sub
