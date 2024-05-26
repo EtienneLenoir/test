@@ -1,0 +1,827 @@
+j'ai des données sur excel, j'ai une colonne prix, une colonne quantité,  et une colonne MV qui est le résultat de prix fois la quantité,  et une colonne pondération MV en %,  qui est la  onderation de la ligne n par rapport au totalt de la colonne MV, c'est à dire (MV X 100) / MV total.
+
+Pour chaque ligne n, je ne dois pas avoir une ponderation MV supérieur à 35%, il faut dans ce cas modifier la quantité pourque la ponderation MV soit égale ) 35, sous la contrainte que la somme de la colonne ponderation MV est égale à 100%.
+
+C'est quelle genre de problème mathematique, ou d'optimisation
+
+
+# Réponse 1
+
+Le problème que vous décrivez est un problème d'optimisation sous contraintes. Plus précisément, il s'agit d'un **problème d'optimisation linéaire** où vous souhaitez maximiser ou minimiser une fonction objective (dans ce cas, la pondération MV de chaque ligne) tout en respectant certaines contraintes (ici, que la pondération de chaque ligne ne dépasse pas 35% et que la somme des pondérations soit égale à 100%).
+
+Voici les étapes pour formuler ce problème de manière plus précise :
+
+1. **Variables de décision :**
+   - \( Q_i \) : Quantité pour la ligne \( i \)
+   - \( MV_i \) : Valeur monétaire (MV) pour la ligne \( i \), où \( MV_i = P_i \times Q_i \)
+   - \( W_i \) : Pondération MV pour la ligne \( i \), où \( W_i = \frac{MV_i \times 100}{\sum MV} \)
+
+2. **Fonction objective :**
+   - Vous n'avez pas explicitement mentionné une fonction à maximiser ou minimiser, mais l'objectif implicite semble être de trouver les \( Q_i \) de manière à respecter les contraintes.
+
+3. **Contraintes :**
+   - \( W_i \leq 35 \% \) pour chaque ligne \( i \)
+   - \( \sum W_i = 100 \% \)
+
+Pour résoudre ce problème, vous pouvez suivre ces étapes :
+
+1. **Calculer le total MV :**
+   - \( \text{MV total} = \sum MV_i = \sum (P_i \times Q_i) \)
+
+2. **Calculer la pondération MV initiale pour chaque ligne :**
+   - \( W_i = \frac{MV_i \times 100}{\text{MV total}} \)
+
+3. **Vérifier les pondérations MV :**
+   - Si \( W_i \leq 35 \% \) pour toutes les lignes \( i \), aucune modification n'est nécessaire.
+   - Si \( W_i > 35 \% \) pour une ou plusieurs lignes \( i \), ajuster \( Q_i \) de manière à ce que \( W_i = 35 \% \).
+
+4. **Ajustement des quantités :**
+   - Pour chaque ligne \( i \) où \( W_i > 35 \% \), ajuster \( Q_i \) pour que \( W_i = 35 \% \). Cela se traduit par :
+     \[
+     Q_i = \frac{35 \% \times \text{MV total}}{P_i \times 100}
+     \]
+
+5. **Répartir le surplus de MV :**
+   - Une fois les lignes ajustées à 35%, il faudra réajuster les quantités des autres lignes pour que la somme des pondérations soit égale à 100%.
+
+Cela peut nécessiter une approche itérative, et il peut être utile d'utiliser des outils comme Solver dans Excel, qui est capable de résoudre des problèmes d'optimisation linéaire avec des contraintes.
+
+### Utilisation de Solver dans Excel :
+
+1. **Activer Solver :**
+   - Assurez-vous que le complément Solver est activé dans Excel (Fichier > Options > Compléments > Gérer les compléments Excel > Aller > Cocher "Solver Add-in").
+
+2. **Configurer Solver :**
+   - Définir la cellule objectif (par exemple, la somme des pondérations).
+   - Ajouter des contraintes pour les pondérations (chaque \( W_i \leq 35 \% \) et la somme des pondérations \( = 100 \% \)).
+   - Définir les cellules variables (les quantités \( Q_i \)).
+
+3. **Résoudre le problème :**
+   - Utiliser Solver pour ajuster les quantités \( Q_i \) afin de respecter toutes les contraintes.
+
+En résumé, il s'agit d'un problème d'optimisation linéaire sous contraintes, et des outils comme Solver dans Excel peuvent être utilisés pour trouver une solution qui respecte toutes les contraintes imposées.
+
+
+# Sol 1
+
+Sub OptimiserQuantites()
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Feuil1") ' Remplacez "Feuil1" par le nom de votre feuille
+
+    Dim derniereligne As Long
+    derniereligne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Dim i As Long
+    Dim totalMV As Double
+    Dim MV_max As Double
+    Dim Q_max As Double
+    
+    ' Calculer le total MV
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    ' Ajuster les quantités pour que la pondération ne dépasse pas 35%
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+        If ws.Cells(i, 4).Value > 35 Then
+            MV_max = 0.35 * totalMV
+            Q_max = MV_max / ws.Cells(i, 1).Value
+            ws.Cells(i, 2).Value = Q_max ' Ajuster la quantité
+            ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' Recalculer MV
+        End If
+    Next i
+    
+    ' Recalculer le total MV après ajustement
+    totalMV = 0
+    For i = 2 To derniereligne
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    ' Recalculer les pondérations MV
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+    
+    ' Réajuster les quantités restantes pour que la somme des pondérations soit 100%
+    Dim totalPonderation As Double
+    totalPonderation = 0
+    For i = 2 To derniereligne
+        totalPonderation = totalPonderation + ws.Cells(i, 4).Value
+    Next i
+    
+    If totalPonderation <> 100 Then
+        Dim surplus As Double
+        surplus = 100 - totalPonderation
+        
+        For i = 2 To derniereligne
+            If ws.Cells(i, 4).Value < 35 Then
+                ws.Cells(i, 4).Value = ws.Cells(i, 4).Value + surplus / (derniereligne - 1)
+                ws.Cells(i, 3).Value = (ws.Cells(i, 4).Value / 100) * totalMV
+                ws.Cells(i, 2).Value = ws.Cells(i, 3).Value / ws.Cells(i, 1).Value
+            End If
+        Next i
+    End If
+
+    ' Afficher un message indiquant que l'optimisation est terminée
+    MsgBox "Optimisation des quantités terminée."
+
+End Sub
+
+
+# Sol 2 lagrange
+
+Sub OptimiserQuantitesLagrange()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Feuil1") ' Remplacez "Feuil1" par le nom de votre feuille
+
+    Dim derniereligne As Long
+    derniereligne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Dim i As Long
+    Dim totalMV As Double
+    Dim MV_max As Double
+    Dim Q_max As Double
+    
+    ' Calculer le total MV
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    ' Ajuster les quantités pour que la pondération ne dépasse pas 35%
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+        If ws.Cells(i, 4).Value > 35 Then
+            MV_max = 0.35 * totalMV
+            Q_max = MV_max / ws.Cells(i, 1).Value
+            ws.Cells(i, 2).Value = Q_max ' Ajuster la quantité
+            ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' Recalculer MV
+        End If
+    Next i
+    
+    ' Recalculer le total MV après ajustement
+    totalMV = 0
+    For i = 2 To derniereligne
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    ' Recalculer les pondérations MV
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+    
+    ' Réajuster les quantités restantes pour que la somme des pondérations soit 100%
+    Dim totalPonderation As Double
+    totalPonderation = 0
+    For i = 2 To derniereligne
+        totalPonderation = totalPonderation + ws.Cells(i, 4).Value
+    Next i
+    
+    If totalPonderation <> 100 Then
+        Dim surplus As Double
+        surplus = 100 - totalPonderation
+        
+        For i = 2 To derniereligne
+            If ws.Cells(i, 4).Value < 35 Then
+                ws.Cells(i, 4).Value = ws.Cells(i, 4).Value + surplus / (derniereligne - 1)
+                ws.Cells(i, 3).Value = (ws.Cells(i, 4).Value / 100) * totalMV
+                ws.Cells(i, 2).Value = ws.Cells(i, 3).Value / ws.Cells(i, 1).Value
+            End If
+        Next i
+    End If
+
+    ' Afficher un message indiquant que l'optimisation est terminée
+    MsgBox "Optimisation des quantités terminée."
+
+End Sub
+
+
+Sub OptimizeMV()
+    ' Activer le solveur
+    Application.AddIns("Solver Add-in").Installed = True
+    SolverReset
+    
+    ' Définir la plage de cellules contenant les valeurs de MV
+    Dim rngMV As Range
+    Set rngMV = Range("C2:C10") ' Adapter en fonction de votre plage de données
+    
+    ' Définir la plage de cellules contenant les quantités
+    Dim rngQuantities As Range
+    Set rngQuantities = Range("B2:B10") ' Adapter en fonction de votre plage de données
+    
+    ' Définir la cellule contenant la somme totale de MV
+    Dim totalMV As Range
+    Set totalMV = Range("C11") ' Cellule contenant la somme totale de MV
+    
+    ' Définir la cellule contenant la pondération MV en %
+    Dim rngPondMV As Range
+    Set rngPondMV = Range("D2:D10") ' Adapter en fonction de votre plage de données
+    
+    ' Initialiser les contraintes
+    SolverAdd CellRef:=rngPondMV, Relation:=1, FormulaText:=0.35 ' Contraintes de pondération <= 35%
+    SolverAdd CellRef:=totalMV, Relation:=2, FormulaText:=1 ' Somme des pondérations = 100%
+    
+    ' Définir l'objectif (maximiser MV)
+    SolverOk SetCell:=totalMV.Address, MaxMinVal:=1, ValueOf:=0, ByChange:=rngQuantities.Address
+    
+    ' Exécuter le solveur
+    SolverSolve UserFinish:=True
+    
+    ' Afficher les résultats
+    SolverFinish KeepFinal:=1
+End Sub
+
+
+# Sol 2 lagrange
+
+Sub OptimiserQuantitesLagrange()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Feuil1") ' Remplacez "Feuil1" par le nom de votre feuille
+
+    Dim derniereligne As Long
+    derniereligne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Dim i As Long, j As Long
+    Dim totalMV As Double
+    Dim MV_max As Double
+    Dim Q_max As Double
+    Dim lambda As Double, delta As Double
+    Dim maxIter As Integer, iter As Integer
+    
+    ' Initialiser les valeurs
+    maxIter = 1000
+    iter = 0
+    delta = 0.0001
+    lambda = 0
+    
+    ' Calculer le total MV
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    ' Ajustement initial des pondérations
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+
+    ' Itérations de la méthode de Lagrange
+    Do While iter < maxIter
+        iter = iter + 1
+        totalMV = 0
+        
+        ' Calculer les MV et le totalMV
+        For i = 2 To derniereligne
+            ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+            totalMV = totalMV + ws.Cells(i, 3).Value
+        Next i
+
+        ' Calculer les pondérations
+        For i = 2 To derniereligne
+            ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+        Next i
+        
+        ' Mettre à jour les quantités en utilisant les multiplicateurs de Lagrange
+        For i = 2 To derniereligne
+            If ws.Cells(i, 4).Value > 35 Then
+                MV_max = 0.35 * totalMV
+                Q_max = MV_max / ws.Cells(i, 1).Value
+                ws.Cells(i, 2).Value = Q_max ' Ajuster la quantité
+                ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' Recalculer MV
+            End If
+        Next i
+
+        ' Vérifier la somme des pondérations
+        Dim totalPonderation As Double
+        totalPonderation = 0
+        For i = 2 To derniereligne
+            totalPonderation = totalPonderation + ws.Cells(i, 4).Value
+        Next i
+
+        ' Ajuster le lambda si la somme des pondérations n'est pas 100%
+        If Abs(totalPonderation - 100) < delta Then Exit Do
+        lambda = lambda - (totalPonderation - 100) * 0.1
+        
+    Loop
+
+    ' Afficher un message indiquant que l'optimisation est terminée
+    MsgBox "Optimisation des quantités terminée après " & iter & " itérations."
+End Sub
+
+# Meme code mais optimisé
+
+Sub OptimiserQuantitesLagrange()
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Feuil1") ' Remplacez "Feuil1" par le nom de votre feuille
+
+    Dim derniereligne As Long
+    derniereligne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Dim i As Long
+    Dim totalMV As Double
+    Dim MV_max As Double
+    Dim Q_max As Double
+    Dim lambda As Double, epsilon As Double
+    Dim maxIter As Integer, iter As Integer
+    
+    ' Initialisation des paramètres
+    maxIter = 1000
+    epsilon = 0.0001
+    lambda = 0
+    
+    ' Calculer le total MV initial et les pondérations
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+
+    ' Itérations de la méthode de Lagrange
+    Do While iter < maxIter
+        iter = iter + 1
+        totalMV = 0
+        
+        ' Calculer les MV et le total MV
+        For i = 2 To derniereligne
+            ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+            totalMV = totalMV + ws.Cells(i, 3).Value
+        Next i
+
+        ' Calculer les pondérations
+        For i = 2 To derniereligne
+            ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+        Next i
+        
+        ' Mettre à jour les quantités en utilisant les multiplicateurs de Lagrange
+        For i = 2 To derniereligne
+            If ws.Cells(i, 4).Value > 35 Then
+                MV_max = 0.35 * totalMV
+                Q_max = MV_max / ws.Cells(i, 1).Value
+                ws.Cells(i, 2).Value = Q_max ' Ajuster la quantité
+                ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' Recalculer MV
+            End If
+        Next i
+
+        ' Vérifier la somme des pondérations
+        Dim totalPonderation As Double
+        totalPonderation = 0
+        For i = 2 To derniereligne
+            totalPonderation = totalPonderation + ws.Cells(i, 4).Value
+        Next i
+
+        ' Ajuster le lambda si la somme des pondérations n'est pas 100%
+        If Abs(totalPonderation - 100) < epsilon Then Exit Do
+        lambda = lambda - (totalPonderation - 100) * 0.1
+        
+    Loop
+
+    ' Réajuster les quantités restantes pour que la somme des pondérations soit 100%
+    Dim surplus As Double
+    surplus = 100 - totalPonderation
+    For i = 2 To derniereligne
+        If ws.Cells(i, 4).Value < 35 Then
+            ws.Cells(i, 4).Value = ws.Cells(i, 4).Value + surplus / (derniereligne - 1)
+            ws.Cells(i, 3).Value = (ws.Cells(i, 4).Value / 100) * totalMV
+            ws.Cells(i, 2).Value = ws.Cells(i, 3).Value / ws.Cells(i, 1).Value
+        End If
+    Next i
+
+    ' Afficher un message indiquant que l'optimisation est terminée
+    MsgBox "Optimisation des quantités terminée après " & iter & " itérations."
+End Sub
+
+
+# Newton Raphson
+
+La méthode de Newton-Raphson, combinée avec les multiplicateurs de Lagrange, permet de résoudre des problèmes d'optimisation sous contrainte de manière efficace. Bien que l'implémentation en VBA soit complexe en raison des calculs matriciels, cette approche offre une solution puissante pour maximiser ou minimiser des fonctions sous des contraintes spécifiques.
+
+Sub OptimizeMVNewtonRaphson()
+    Dim rngMV As Range, rngQuantities As Range, totalMV As Range, rngPondMV As Range
+    Dim i As Integer, j As Integer, n As Integer
+    Dim lambda As Double, epsilon As Double
+    Dim x As Variant, g As Variant, gradF As Variant, hessL As Variant
+    
+    ' Définir les plages de données
+    Set rngMV = Range("C2:C10") ' Adapter en fonction de votre plage de données
+    Set rngQuantities = Range("B2:B10") ' Adapter en fonction de votre plage de données
+    Set totalMV = Range("C11") ' Cellule contenant la somme totale de MV
+    Set rngPondMV = Range("D2:D10") ' Adapter en fonction de votre plage de données
+    
+    n = rngMV.Rows.Count
+    ReDim x(n)
+    ReDim g(n)
+    ReDim gradF(n)
+    ReDim hessL(n, n)
+    
+    ' Initialiser les valeurs
+    For i = 1 To n
+        x(i) = rngQuantities.Cells(i, 1).Value
+    Next i
+    lambda = 0
+    epsilon = 0.0001
+    
+    ' Fonction de coût et contrainte
+    Function Lagrangienne(x As Variant, lambda As Double) As Double
+        Dim L As Double
+        L = 0
+        For i = 1 To n
+            L = L + rngMV.Cells(i, 1).Value * x(i) - lambda * (rngPondMV.Cells(i, 1).Value - 0.35)
+        Next i
+        Lagrangienne = L
+    End Function
+    
+    ' Gradient de la fonction de coût
+    Function GradientL(x As Variant, lambda As Double) As Variant
+        For i = 1 To n
+            gradF(i) = rngMV.Cells(i, 1).Value - lambda * rngPondMV.Cells(i, 1).Value
+        Next i
+        GradientL = gradF
+    End Function
+    
+    ' Hessienne de la fonction de coût
+    Function HessienneL(x As Variant, lambda As Double) As Variant
+        For i = 1 To n
+            For j = 1 To n
+                hessL(i, j) = 0 ' Adapter pour la hessienne spécifique
+            Next j
+        Next i
+        HessienneL = hessL
+    End Function
+    
+    ' Itérations de Newton-Raphson
+    Do
+        gradF = GradientL(x, lambda)
+        hessL = HessienneL(x, lambda)
+        
+        ' Mise à jour des variables
+        For i = 1 To n
+            x(i) = x(i) - gradF(i) / hessL(i, i)
+        Next i
+        
+        ' Vérifier la convergence
+        If Abs(Lagrangienne(x, lambda) - Lagrangienne(x, lambda - epsilon)) < epsilon Then Exit Do
+        
+    Loop
+    
+    ' Mise à jour des quantités optimisées
+    For i = 1 To n
+        rngQuantities.Cells(i, 1).Value = x(i)
+    Next i
+End Sub
+
+
+# Solveur
+
+
+Sub OptimisationLineaire()
+    Dim n As Integer
+    Dim i As Integer
+    Dim Prix() As Double
+    Dim Quantite() As Double
+    Dim TotalMV As Double
+    
+    ' Déterminer le nombre de lignes dans vos données
+    n = Cells(Rows.Count, 1).End(xlUp).Row - 1 ' Soustraire 1 pour exclure l'en-tête
+    
+    ' Redimensionner les tableaux pour stocker les prix et les quantités
+    ReDim Prix(1 To n)
+    ReDim Quantite(1 To n)
+    
+    ' Récupérer les données de la feuille de calcul
+    For i = 1 To n
+        Prix(i) = Cells(i + 1, 1).Value ' Colonne des prix
+        Quantite(i) = Cells(i + 1, 2).Value ' Colonne des quantités
+    Next i
+    
+    ' Calculer le total de la colonne MV
+    TotalMV = Application.WorksheetFunction.Sum(Application.WorksheetFunction.Index(Prix, 0, 1) * Application.WorksheetFunction.Index(Quantite, 0, 1))
+    
+    ' Configurer le solveur Excel
+    SolverReset ' Réinitialiser les paramètres du solveur
+    SolverOptions Precision:=0.000001 ' Précision du solveur
+    
+    ' Définir la cellule objectif (à minimiser)
+    SolverOk SetCell:="$B$1", MaxMinVal:=2, ValueOf:=0
+    
+    ' Ajouter les contraintes
+    ' Contrainte 1 : Pondération MV <= 35% pour chaque ligne
+    SolverAdd CellRef:="$B$2:$B$" & n + 1, Relation:=3, FormulaText:="35"
+    
+    ' Contrainte 2 : Somme des pondérations MV = 100%
+    SolverAdd CellRef:="$C$1", Relation:=2, FormulaText:="100"
+    
+    ' Contrainte 3 : Quantité >= 0 pour chaque ligne
+    SolverAdd CellRef:="$C$2:$C$" & n + 1, Relation:=3, FormulaText:="0"
+    
+    ' Contrainte 4 : Quantité <= 1 pour chaque ligne (pour éviter les quantités négatives)
+    SolverAdd CellRef:="$C$2:$C$" & n + 1, Relation:=1, FormulaText:="1"
+    
+    ' Résoudre le problème d'optimisation
+    SolverSolve UserFinish:=True
+    
+    ' Mettre à jour les quantités dans la feuille de calcul avec les quantités optimales trouvées par le solveur
+    For i = 1 To n
+        Cells(i + 1, 2).Value = Quantite(i)
+    Next i
+End Sub
+
+# Solveur
+
+Sub OptimiserPonderationsMV()
+    Dim ws As Worksheet
+    Dim rng As Range
+    Dim numRows As Integer
+    Dim i As Integer
+    
+    ' Référence à la feuille de calcul active
+    Set ws = ThisWorkbook.ActiveSheet
+    
+    ' Référence à la plage de données
+    Set rng = ws.Range("A2").CurrentRegion
+    numRows = rng.Rows.Count
+    
+    ' Définir les variables pour les quantités
+    Dim quantites As Variant
+    quantites = ws.Range("C2:C" & numRows).Value
+    
+    ' Définir les variables pour les pondérations MV
+    Dim pondMVs As Variant
+    pondMVs = ws.Range("D2:D" & numRows).Value
+    
+    ' Définir la fonction objectif
+    Dim objFunction As String
+    objFunction = "=SUMPRODUCT(C2:C" & numRows & ",D2:D" & numRows & "-35)^2"
+    
+    ' Réinitialiser Solver
+    Application.ResetSolver
+    
+    ' Définir les variables de décision (quantités) comme variables réelles
+    SolverOk SetCell:="$C$2:$C$" & numRows, MaxMinVal:=2, ValueOf:=0, ByChange:="$C$2:$C$" & numRows, Engine:=1, EngineDesc:="GRG Nonlinear"
+    
+    ' Ajouter la contrainte de somme des pondérations MV égale à 100%
+    SolverAdd CellRef:="$D$2:$D$" & numRows, Relation:=1, FormulaText:="100%"
+    
+    ' Ajouter la contrainte que chaque pondération MV ne doit pas dépasser 35%
+    SolverAdd CellRef:="$D$2:$D$" & numRows, Relation:=2, FormulaText:="35%"
+    
+    ' Définir la fonction objectif à minimiser
+    SolverObjective SetCell:="$E$1", FormulaText:=objFunction
+    
+    ' Exécuter Solver
+    SolverSolve UserFinish:=True
+    
+    ' Mettre à jour les quantités avec les valeurs trouvées par Solver
+    For i = 1 To numRows
+        ws.Cells(i + 1, 3).Value = quantites(i, 1)
+    Next i
+    
+    MsgBox "Optimisation terminée avec succès!"
+End Sub
+
+
+# simplex
+
+Voici un exemple de code VBA pour résoudre ce problème à l'aide de la méthode du Simplexe dans Excel. Ce code suppose que vos données commencent à la cellule A2 et que les colonnes sont dans l'ordre "Prix", "Quantité", "MV", et "Pondération MV en %" dans les colonnes B à E.
+
+Sub OptimiserPonderationsMV_Simplexe()
+    Dim ws As Worksheet
+    Dim rng As Range
+    Dim numRows As Integer
+    Dim i As Integer
+    
+    ' Référence à la feuille de calcul active
+    Set ws = ThisWorkbook.ActiveSheet
+    
+    ' Référence à la plage de données
+    Set rng = ws.Range("A2").CurrentRegion
+    numRows = rng.Rows.Count
+    
+    ' Définir les variables pour les quantités
+    Dim quantites As Variant
+    quantites = ws.Range("C2:C" & numRows).Value
+    
+    ' Définir les variables pour les pondérations MV
+    Dim pondMVs As Variant
+    pondMVs = ws.Range("D2:D" & numRows).Value
+    
+    ' Définir les coefficients de la fonction objectif
+    Dim objCoefficients As Variant
+    ReDim objCoefficients(1 To numRows)
+    For i = 1 To numRows
+        objCoefficients(i) = pondMVs(i, 1)
+    Next i
+    
+    ' Définir la matrice des contraintes
+    Dim matriceContraintes As Variant
+    ReDim matriceContraintes(1 To numRows, 1 To numRows)
+    For i = 1 To numRows
+        matriceContraintes(i, i) = 1
+    Next i
+    
+    ' Définir les relations de contraintes
+    Dim relationsContraintes As Variant
+    ReDim relationsContraintes(1 To numRows)
+    For i = 1 To numRows
+        relationsContraintes(i) = 2
+    Next i
+    
+    ' Définir les valeurs de droite des contraintes
+    Dim valeursDroiteContraintes As Variant
+    ReDim valeursDroiteContraintes(1 To numRows)
+    For i = 1 To numRows
+        valeursDroiteContraintes(i) = 35
+    Next i
+    
+    ' Définir la fonction objectif
+    Dim objFunction As Variant
+    objFunction = Application.Transpose(objCoefficients)
+    
+    ' Réinitialiser Solver
+    Application.ResetSolver
+    
+    ' Définir les options de Solver
+    SolverOptions MaxTime:=100, Iterations:=1000, Precision:=0.00001, AssumeNonNeg:=True
+    
+    ' Exécuter Solver
+    SolverOk SetCell:="$E$1", MaxMinVal:=1, ByChange:="$C$2:$C$" & numRows, _
+        Engine:=1, EngineDesc:="Simplex LP"
+    SolverAdd CellRef:="$C$2:$C$" & numRows, Relation:=1, FormulaText:="0"
+    SolverAdd CellRef:="$D$2:$D$" & numRows, Relation:=1, FormulaText:="0"
+    SolverAdd CellRef:="$D$2:$D$" & numRows, Relation:=2, FormulaText:="35"
+    SolverAdd CellRef:="$D$" & numRows + 2, Relation:=1, FormulaText:="100"
+    SolverSolve True
+    
+    ' Mettre à jour les quantités avec les valeurs trouvées par Solver
+    For i = 1 To numRows
+        ws.Cells(i + 1, 3).Value = quantites(i, 1)
+    Next i
+    
+    MsgBox "Optimisation terminée avec succès!"
+End Sub
+
+
+
+# New 
+
+Sub ajusterQuantite()
+
+    Dim ws As Worksheet
+    Dim rng As Range
+    Dim prixCol As Integer
+    Dim quantiteCol As Integer
+    Dim mvCol As Integer
+    Dim ponderationCol As Integer
+    Dim lastRow As Long
+    Dim mvTotal As Double
+    Dim i As Long
+    Dim ponderationTotal As Double
+    Dim ponderationMax As Double
+    Dim ajustement As Double
+    Dim quantite As Double
+    
+    ' Spécifiez la feuille de calcul et les colonnes concernées
+    Set ws = ThisWorkbook.Sheets("Feuille1")
+    prixCol = 1 ' Colonne contenant les prix
+    quantiteCol = 2 ' Colonne contenant les quantités
+    mvCol = 3 ' Colonne contenant les valeurs MV
+    ponderationCol = 4 ' Colonne contenant les pondérations MV
+    
+    ' Trouver la dernière ligne de données
+    lastRow = ws.Cells(ws.Rows.Count, prixCol).End(xlUp).Row
+    
+    ' Calculer la somme de la colonne MV
+    mvTotal = Application.WorksheetFunction.Sum(ws.Range(ws.Cells(2, mvCol), ws.Cells(lastRow, mvCol)))
+    
+    ' Initialiser la somme des pondérations MV
+    ponderationTotal = 0
+    
+    ' Boucle à travers chaque ligne de données
+    For i = 2 To lastRow
+        ' Calculer la pondération MV pour cette ligne
+        ws.Cells(i, ponderationCol).Value = (ws.Cells(i, mvCol).Value * 100) / mvTotal
+        
+        ' Ajouter la pondération MV à la somme totale
+        ponderationTotal = ponderationTotal + ws.Cells(i, ponderationCol).Value
+        
+        ' Vérifier si la pondération dépasse 35%
+        If ws.Cells(i, ponderationCol).Value > 35 Then
+            ' Calculer l'ajustement nécessaire pour ramener la pondération à 35%
+            ajustement = (35 * mvTotal / 100) - (ws.Cells(i, mvCol).Value * 100)
+            
+            ' Calculer la nouvelle quantité
+            quantite = ws.Cells(i, quantiteCol).Value + ajustement / ws.Cells(i, prixCol).Value
+            
+            ' Mettre à jour la quantité dans la feuille de calcul
+            ws.Cells(i, quantiteCol).Value = quantite
+        End If
+    Next i
+    
+    ' Vérifier si la somme des pondérations est égale à 100%
+    If ponderationTotal <> 100 Then
+        MsgBox "La somme des pondérations MV n'est pas égale à 100%."
+    End If
+    
+End Sub
+
+Sub Simplex()
+
+    Dim ws As Worksheet
+    Dim rngData As Range
+    Dim lastRow As Long
+    Dim MVTotal As Double
+    Dim i As Long
+    Dim j As Long
+    Dim coef() As Double
+    Dim contraintes() As Double
+    Dim solution() As Double
+    Dim objFct() As Double
+    
+    ' Spécifiez la feuille de calcul contenant les données
+    Set ws = ThisWorkbook.Sheets("Feuille1")
+    
+    ' Spécifiez la plage de données contenant les prix, quantités et MV
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Set rngData = ws.Range("A2:C" & lastRow)
+    
+    ' Initialisez les tableaux pour le Simplex
+    ReDim coef(1 To rngData.Rows.Count, 1 To rngData.Rows.Count)
+    ReDim contraintes(1 To rngData.Rows.Count)
+    ReDim solution(1 To rngData.Rows.Count)
+    ReDim objFct(1 To rngData.Rows.Count)
+    
+    ' Calculez MV Total
+    MVTotal = Application.WorksheetFunction.Sum(ws.Range("C2:C" & lastRow))
+    
+    ' Remplissez les tableaux
+    For i = 1 To rngData.Rows.Count
+        coef(i, i) = 1
+        contraintes(i) = rngData.Cells(i, 3) / MVTotal
+        objFct(i) = 0
+    Next i
+    
+    ' Définissez la fonction objectif (maximiser)
+    For i = 1 To rngData.Rows.Count
+        objFct(i) = 0
+    Next i
+    
+    ' Appelez le solveur
+    SolverOk SetCell:="$F$2", MaxMinVal:=1, ValueOf:="0", ByChange:=rngData.Offset(0, 1).Address, _
+        Engine:=3, EngineDesc:="Simplex LP"
+    
+    SolverAdd CellRef:=rngData.Offset(0, 1).Address, Relation:=1, FormulaText:="0"
+    
+    SolverAdd CellRef:=rngData.Offset(0, 2).Address, Relation:=3, FormulaText:="0.35"
+    
+    SolverOptions AssumeNonNeg:=True
+    
+    SolverSolve UserFinish:=True
+    
+    ' Mettez à jour les quantités avec les nouvelles valeurs
+    For i = 1 To rngData.Rows.Count
+        rngData.Cells(i, 2).Value = rngData.Cells(i, 3).Value * 0.35 / contraintes(i)
+    Next i
+    
+End Sub
+
+
+Sub EnregistrerCopieResultats()
+    Dim CheminFichier As String
+    Dim NomFichier As String
+    
+    ' Ouvre la boîte de dialogue pour choisir l'emplacement et le nom du fichier
+    With Application.FileDialog(msoFileDialogSaveAs)
+        .Title = "Enregistrer la copie de la feuille Resultats"
+        .InitialFileName = "Resultats_copy"
+        .FilterIndex = 1 ' Filtre pour les fichiers Excel
+        If .Show = -1 Then ' Si l'utilisateur clique sur Enregistrer
+            CheminFichier = .SelectedItems(1)
+        Else
+            Exit Sub ' Si l'utilisateur annule, sort de la procédure
+        End If
+    End With
+    
+    ' Vérifie si l'utilisateur a saisi une extension, sinon ajoute ".xlsx" par défaut
+    If Right(CheminFichier, 5) <> ".xlsx" Then
+        CheminFichier = CheminFichier & ".xlsx"
+    End If
+    
+    ' Copie la feuille "Resultats" dans un nouveau classeur
+    Sheets("Resultats").Copy
+    ' Enregistre le nouveau classeur avec l'emplacement et le nom spécifiés
+    ActiveWorkbook.SaveAs Filename:=CheminFichier, FileFormat:=xlOpenXMLWorkbook
+    ' Ferme le nouveau classeur sans enregistrer les modifications apportées au modèle
+    ActiveWorkbook.Close SaveChanges:=False
+    
+    MsgBox "La copie de la feuille Resultats a été enregistrée avec succès.", vbInformation
+End Sub
