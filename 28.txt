@@ -1,0 +1,53 @@
+Sub OptimizeQuantities()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Sheet1") ' Nom de la feuille
+
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    ' Calculer MV
+    Dim i As Long
+    For i = 2 To lastRow
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value
+    Next i
+
+    ' Utiliser Solver pour optimiser les quantités
+    SolverReset
+    SolverOptions MaxTime:=100, Iterations:=100, Precision:=0.000001, AssumeNonNeg:=True
+
+    ' Définir la fonction objective (minimiser la somme des quantités)
+    SolverOk SetCell:="", MaxMinVal:=3, ValueOf:="0", ByChange:=ws.Range("B2:B" & lastRow)
+
+    ' Ajouter la contrainte : Pondération MV <= 35%
+    Dim totalMV As Double
+    totalMV = WorksheetFunction.Sum(ws.Range("C2:C" & lastRow))
+    Dim targetCell As String
+    For i = 2 To lastRow
+        targetCell = "D" & i
+        SolverAdd CellRef:=targetCell, Relation:=1, FormulaText:="35"
+    Next i
+
+    ' Ajouter la contrainte : Somme des pondérations = 100%
+    Dim totalPond As String
+    totalPond = "D" & lastRow + 1
+    ws.Cells(lastRow + 1, 4).Formula = "=SUM(D2:D" & lastRow & ")"
+    SolverAdd CellRef:=totalPond, Relation:=2, FormulaText:="100"
+
+    ' Ajouter la contrainte : Quantités > 0
+    For i = 2 To lastRow
+        SolverAdd CellRef:=ws.Cells(i, 2), Relation:=3, FormulaText:="0"
+    Next i
+
+    ' Résoudre le problème
+    SolverSolve UserFinish:=True
+    SolverFinish KeepFinal:=1
+
+    ' Recalculer MV et pondération MV
+    totalMV = WorksheetFunction.Sum(ws.Range("C2:C" & lastRow))
+    For i = 2 To lastRow
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value * 100) / totalMV
+    Next i
+
+    MsgBox "Quantités optimisées avec succès."
+End Sub
