@@ -1,0 +1,82 @@
+Sub TesterTrierDictionnaire()
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    
+    ' Ajouter des éléments au dictionnaire
+    dict.Add "A", 5
+    dict.Add "B", 3
+    dict.Add "C", 8
+    dict.Add "D", 1
+    
+    ' Trier le dictionnaire en ordre croissant
+    TrierDictionnaire dict, False
+    
+    ' Afficher les éléments triés
+    For Each key In dict.keys
+        Debug.Print key & ": " & dict(key)
+    Next key
+End Sub
+
+
+
+
+
+
+
+
+
+
+
+
+Sub TrierDictionnaire(dictionnaire As Object, croissant As Boolean)
+    Dim keys() As Variant
+    Dim values() As Variant
+    Dim i As Integer, j As Integer
+    Dim temp_key As Variant, temp_value As Variant
+
+    ' Transférer les clés et les valeurs du dictionnaire dans des tableaux
+    ReDim keys(0 To dictionnaire.Count - 1)
+    ReDim values(0 To dictionnaire.Count - 1)
+    i = 0
+    For Each key In dictionnaire.keys
+        keys(i) = key
+        values(i) = dictionnaire(key)
+        i = i + 1
+    Next key
+
+    ' Appliquer le tri en utilisant l'algorithme du tri à bulles
+    For i = LBound(values) To UBound(values) - 1
+        For j = i + 1 To UBound(values)
+            If croissant Then
+                If values(i) > values(j) Then
+                    ' Échanger les valeurs et les clés
+                    temp_value = values(i)
+                    values(i) = values(j)
+                    values(j) = temp_value
+
+                    temp_key = keys(i)
+                    keys(i) = keys(j)
+                    keys(j) = temp_key
+                End If
+            Else
+                If values(i) < values(j) Then
+                    ' Échanger les valeurs et les clés
+                    temp_value = values(i)
+                    values(i) = values(j)
+                    values(j) = temp_value
+
+                    temp_key = keys(i)
+                    keys(i) = keys(j)
+                    keys(j) = temp_key
+                End If
+            End If
+        Next j
+    Next i
+
+    ' Remettre les clés et les valeurs triées dans le dictionnaire
+    Set dictionnaire = CreateObject("Scripting.Dictionary")
+    For i = LBound(keys) To UBound(keys)
+        dictionnaire(keys(i)) = values(i)
+    Next i
+End Sub
+
