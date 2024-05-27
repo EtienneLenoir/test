@@ -1,3 +1,5 @@
+https://www.linkedin.com/pulse/integrating-vba-simplex-arda-ata/
+
 Sub OptimiserQuantitesAvecSolveur()
 
     Dim ws As Worksheet
@@ -63,5 +65,74 @@ Sub OptimiserQuantitesAvecSolveur()
     
     ' Afficher un message indiquant que l'optimisation est terminée
     MsgBox "Optimisation des quantités terminée avec Solver."
+
+End Sub
+
+
+Sub OptimiserQuantitesAvecSimplex()
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Feuil1") ' Remplacez "Feuil1" par le nom de votre feuille
+
+    Dim derniereligne As Long
+    derniereligne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    Dim i As Long
+    Dim totalMV As Double
+    
+    ' Calculer le total MV initial
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+
+    ' Assurez-vous que le complément Solver est activé
+    If Not SolverOK Then
+        MsgBox "Solver n'est pas activé. Veuillez activer le complément Solver.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Définir les pondérations MV initiales
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+    
+    ' Définir l'objectif du solveur : minimiser la somme des écarts au carré des pondérations par rapport à 35%
+    SolverReset
+    SolverOptions MaxTime:=100, Iterations:=1000, Precision:=0.0001, AssumeNonNeg:=True, AssumeLinear:=True
+    
+    Dim cible As Range
+    Set cible = ws.Range("E1")
+    ws.Range("E1").Formula = "=SUMXMY2(RC4:RC4,35)"
+    
+    SolverOK SetCell:=cible.Address, MaxMinVal:=2, ValueOf:=0, ByChange:=ws.Range("B2:B" & derniereligne).Address
+    
+    ' Ajouter les contraintes de pondération
+    For i = 2 To derniereligne
+        SolverAdd CellRef:=ws.Cells(i, 4).Address, Relation:=1, FormulaText:="35"
+    Next i
+    
+    ' Ajouter les contraintes de non-négativité sur les quantités
+    For i = 2 To derniereligne
+        SolverAdd CellRef:=ws.Cells(i, 2).Address, Relation:=3, FormulaText:="0"
+    Next i
+    
+    ' Résoudre le problème en utilisant Simplex LP
+    SolverSolve UserFinish:=True, ShowRef:=False
+    
+    ' Mettre à jour les valeurs marchandes et les pondérations après l'optimisation
+    totalMV = 0
+    For i = 2 To derniereligne
+        ws.Cells(i, 3).Value = ws.Cells(i, 1).Value * ws.Cells(i, 2).Value ' MV = Prix * Quantité
+        totalMV = totalMV + ws.Cells(i, 3).Value
+    Next i
+    
+    For i = 2 To derniereligne
+        ws.Cells(i, 4).Value = (ws.Cells(i, 3).Value / totalMV) * 100 ' Pondération MV (%)
+    Next i
+    
+    ' Afficher un message indiquant que l'optimisation est terminée
+    MsgBox "Optimisation des quantités terminée avec Solver et Simplex LP."
 
 End Sub
