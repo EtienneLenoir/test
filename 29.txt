@@ -1,0 +1,418 @@
+Sub TestDebugPrintDictionary()
+    ' Créer un exemple de dictionnaire de dictionnaires
+    Dim mainDict As Object
+    Set mainDict = CreateObject("Scripting.Dictionary")
+    
+    Dim subDict1 As Object
+    Set subDict1 = CreateObject("Scripting.Dictionary")
+    subDict1.Add "SubKey1", "Value1"
+    subDict1.Add "SubKey2", "Value2"
+    
+    Dim subDict2 As Object
+    Set subDict2 = CreateObject("Scripting.Dictionary")
+    subDict2.Add "SubKeyA", "ValueA"
+    subDict2.Add "SubKeyB", "ValueB"
+    
+    mainDict.Add "Dict1", subDict1
+    mainDict.Add "Dict2", subDict2
+    
+    ' Appeler la fonction pour afficher le dictionnaire
+    DebugPrintDictionary mainDict
+End Sub
+
+Sub DebugPrintDictionary(dict As Object)
+    Dim key As Variant
+    Dim subDict As Object
+    Dim subKey As Variant
+    
+    For Each key In dict.Keys
+        Debug.Print "Key: " & key
+        
+        ' Vérification si la clé existe
+        If dict.Exists(key) Then
+            Set subDict = dict(key)
+            
+            For Each subKey In subDict.Keys
+                ' Vérification si la sous-clé existe
+                If subDict.Exists(subKey) Then
+                    Debug.Print "    SubKey: " & subKey & " - Value: " & subDict(subKey)
+                End If
+            Next subKey
+        End If
+    Next key
+End Sub
+
+
+====================================================================================================
+
+
+Option Explicit
+
+' Assurez-vous que la référence "Microsoft Scripting Runtime" est activée
+' Outils > Références > Cocher "Microsoft Scripting Runtime"
+
+Sub TestQuickSortDictionary()
+    Dim dict As Scripting.Dictionary
+    Dim sortedKeys As Variant
+    Dim key As Variant
+    
+    ' Création et initialisation du dictionnaire
+    Set dict = New Scripting.Dictionary
+    dict.Add "c", 3
+    dict.Add "a", 1
+    dict.Add "b", 2
+    
+    ' Appel de la fonction pour trier les éléments en ordre croissant
+    sortedKeys = QuickSortDictionary(dict, True)
+    Debug.Print "Ordre croissant :"
+    For Each key In sortedKeys
+        Debug.Print key & " : " & dict(key)
+    Next key
+
+    ' Appel de la fonction pour trier les éléments en ordre décroissant
+    sortedKeys = QuickSortDictionary(dict, False)
+    Debug.Print "Ordre décroissant :"
+    For Each key In sortedKeys
+        Debug.Print key & " : " & dict(key)
+    Next key
+End Sub
+
+Function QuickSortDictionary(ByVal dict As Scripting.Dictionary, ByVal ascending As Boolean) As Variant
+    Dim keys As Variant
+    keys = dict.keys
+    QuickSort keys, LBound(keys), UBound(keys), ascending
+    QuickSortDictionary = keys
+End Function
+
+Private Sub QuickSort(arr As Variant, ByVal low As Long, ByVal high As Long, ByVal ascending As Boolean)
+    Dim pivot As Variant
+    Dim i As Long, j As Long
+    Dim temp As Variant
+    
+    If low < high Then
+        pivot = arr((low + high) \ 2)
+        i = low
+        j = high
+        
+        Do While i <= j
+            If ascending Then
+                Do While arr(i) < pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) > pivot
+                    j = j - 1
+                Loop
+            Else
+                Do While arr(i) > pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) < pivot
+                    j = j - 1
+                Loop
+            End If
+            
+            If i <= j Then
+                temp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = temp
+                i = i + 1
+                j = j - 1
+            End If
+        Loop
+        
+        ' Appel récursif du tri rapide
+        QuickSort arr, low, j, ascending
+        QuickSort arr, i, high, ascending
+    End If
+End Sub
+
+
+
+"==================================================================================
+Option Explicit
+
+Sub SimplexMethod()
+    Dim A As Variant, B As Variant, C As Variant
+    Dim m As Integer, n As Integer
+    Dim tableau As Variant
+    Dim basic As Variant, nonbasic As Variant
+    Dim pivotCol As Integer, pivotRow As Integer
+    
+    ' Define the problem
+    ' Maximizing Z = 3x1 + 2x2
+    ' Subject to:
+    ' x1 + x2 <= 4
+    ' 2x1 + x2 <= 5
+    ' x1, x2 >= 0
+    
+    ' Coefficients of constraints
+    A = Array(Array(1, 1), Array(2, 1))
+    ' Right-hand side of constraints
+    B = Array(4, 5)
+    ' Coefficients of objective function
+    C = Array(3, 2)
+    
+    m = UBound(A) + 1 ' Number of constraints
+    n = UBound(A(0)) + 1 ' Number of variables
+    
+    ' Initialize the tableau
+    ReDim tableau(0 To m, 0 To n + m)
+    Dim i As Integer, j As Integer
+    For i = 0 To m - 1
+        For j = 0 To n - 1
+            tableau(i, j) = A(i)(j)
+        Next j
+        tableau(i, n + i) = 1 ' Add slack variables
+        tableau(i, n + m) = B(i)
+    Next i
+    For j = 0 To n - 1
+        tableau(m, j) = -C(j)
+    Next j
+    
+    ' Perform Simplex method
+    Do
+        pivotCol = SelectPivotColumn(tableau, m, n + m)
+        If pivotCol = -1 Then Exit Do ' Optimal solution found
+        
+        pivotRow = SelectPivotRow(tableau, pivotCol, m, n + m)
+        If pivotRow = -1 Then
+            MsgBox "The problem is unbounded."
+            Exit Sub
+        End If
+        
+        PerformPivot tableau, pivotRow, pivotCol, m, n + m
+    Loop
+    
+    ' Display the solution
+    Dim result As String
+    result = "Optimal solution found:" & vbCrLf
+    For i = 0 To n - 1
+        result = result & "x" & (i + 1) & " = " & tableau(m, n + m) & vbCrLf
+    Next i
+    result = result & "Maximum Z = " & -tableau(m, n + m)
+    MsgBox result
+End Sub
+
+Function SelectPivotColumn(tableau As Variant, m As Integer, n As Integer) As Integer
+    Dim j As Integer
+    Dim minValue As Double
+    Dim pivotCol As Integer
+    minValue = 0
+    pivotCol = -1
+    For j = 0 To n - 1
+        If tableau(m, j) < minValue Then
+            minValue = tableau(m, j)
+            pivotCol = j
+        End If
+    Next j
+    SelectPivotColumn = pivotCol
+End Function
+
+Function SelectPivotRow(tableau As Variant, pivotCol As Integer, m As Integer, n As Integer) As Integer
+    Dim i As Integer
+    Dim minRatio As Double
+    Dim pivotRow As Integer
+    minRatio = 1E+30 ' A large number
+    pivotRow = -1
+    For i = 0 To m - 1
+        If tableau(i, pivotCol) > 0 Then
+            Dim ratio As Double
+            ratio = tableau(i, n) / tableau(i, pivotCol)
+            If ratio < minRatio Then
+                minRatio = ratio
+                pivotRow = i
+            End If
+        End If
+    Next i
+    SelectPivotRow = pivotRow
+End Function
+
+Sub PerformPivot(tableau As Variant, pivotRow As Integer, pivotCol As Integer, m As Integer, n As Integer)
+    Dim i As Integer, j As Integer
+    Dim pivotValue As Double
+    pivotValue = tableau(pivotRow, pivotCol)
+    For j = 0 To n
+        tableau(pivotRow, j) = tableau(pivotRow, j) / pivotValue
+    Next j
+    For i = 0 To m
+        If i <> pivotRow Then
+            Dim factor As Double
+            factor = tableau(i, pivotCol)
+            For j = 0 To n
+                tableau(i, j) = tableau(i, j) - factor * tableau(pivotRow, j)
+            Next j
+        End If
+    Next i
+End Sub
+
+
+'==============================================================
+
+
+'========================================
+
+
+Option Explicit
+
+Sub SimplexMethodAdjustQuantities()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long, j As Long
+    Dim totalVG_EUR As Double
+    Dim totalVG_EUR_new As Double
+    Dim maxPonderation As Double
+    Dim n As Integer, m As Integer
+    Dim A() As Double, B() As Double, C() As Double
+    Dim tableau() As Double
+    Dim quantities() As Double, prices() As Double, vg() As Double
+    
+    Set ws = ThisWorkbook.Sheets("Sheet1") ' Change to your sheet name
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row ' Assuming column A has data
+    
+    ' Read data from worksheet
+    n = lastRow - 1 ' Number of variables (quantities)
+    m = n + 1 ' Number of constraints (one additional for total ponderation = 100%)
+    
+    ReDim quantities(1 To n)
+    ReDim prices(1 To n)
+    ReDim vg(1 To n)
+    ReDim A(1 To m, 1 To n)
+    ReDim B(1 To m)
+    ReDim C(1 To n)
+    ReDim tableau(1 To m + 1, 1 To n + m + 1)
+    
+    For i = 2 To lastRow ' Assuming headers are in the first row
+        quantities(i - 1) = ws.Cells(i, 2).Value ' Quantity column
+        prices(i - 1) = ws.Cells(i, 1).Value ' Price column
+        vg(i - 1) = ws.Cells(i, 3).Value ' VG column
+    Next i
+    
+    ' Initialize the coefficients for the constraints and objective function
+    For i = 1 To n
+        A(i, i) = prices(i) * vg(i)
+        B(i) = 0.35 ' Max ponderation VG EUR
+        C(i) = -prices(i) * vg(i) ' We want to minimize the negative value to maximize VG EUR
+    Next i
+    
+    ' Additional constraint: sum of ponderations = 100%
+    For i = 1 To n
+        A(m, i) = prices(i) * vg(i)
+    Next i
+    B(m) = 1 ' 100% in decimal
+    
+    ' Build initial simplex tableau
+    For i = 1 To m
+        For j = 1 To n
+            tableau(i, j) = A(i, j)
+        Next j
+        tableau(i, n + i) = 1 ' Slack variables
+        tableau(i, n + m + 1) = B(i)
+    Next i
+    For j = 1 To n
+        tableau(m + 1, j) = C(j)
+    Next j
+    
+    ' Perform Simplex method
+    Dim pivotCol As Integer, pivotRow As Integer
+    Do
+        pivotCol = SelectPivotColumn(tableau, m, n + m)
+        If pivotCol = -1 Then Exit Do ' Optimal solution found
+        
+        pivotRow = SelectPivotRow(tableau, pivotCol, m, n + m)
+        If pivotRow = -1 Then
+            MsgBox "The problem is unbounded."
+            Exit Sub
+        End If
+        
+        PerformPivot tableau, pivotRow, pivotCol, m, n + m
+    Loop
+    
+    ' Update quantities with the optimal solution
+    For i = 1 To n
+        quantities(i) = 0 ' Initialize quantities
+    Next i
+    For i = 1 To m
+        If tableau(i, n + m + 1) <> 0 Then
+            For j = 1 To n
+                If tableau(i, j) = 1 And IsQuantitativeVariable(tableau, i, j, m, n + m) Then
+                    quantities(j) = tableau(i, n + m + 1)
+                End If
+            Next j
+        End If
+    Next i
+    
+    ' Write adjusted quantities back to the worksheet
+    For i = 2 To lastRow
+        ws.Cells(i, 2).Value = quantities(i - 1) ' Quantity column
+        ws.Cells(i, 4).Value = prices(i - 1) * quantities(i - 1) * vg(i - 1) ' VG EUR column
+    Next i
+    
+    MsgBox "Quantities adjusted successfully!"
+End Sub
+
+Function SelectPivotColumn(tableau As Variant, m As Integer, n As Integer) As Integer
+    Dim j As Integer
+    Dim minValue As Double
+    Dim pivotCol As Integer
+    minValue = 0
+    pivotCol = -1
+    For j = 1 To n
+        If tableau(m + 1, j) < minValue Then
+            minValue = tableau(m + 1, j)
+            pivotCol = j
+        End If
+    Next j
+    SelectPivotColumn = pivotCol
+End Function
+
+Function SelectPivotRow(tableau As Variant, pivotCol As Integer, m As Integer, n As Integer) As Integer
+    Dim i As Integer
+    Dim minRatio As Double
+    Dim pivotRow As Integer
+    minRatio = 1E+30 ' A large number
+    pivotRow = -1
+    For i = 1 To m
+        If tableau(i, pivotCol) > 0 Then
+            Dim ratio As Double
+            ratio = tableau(i, n + 1) / tableau(i, pivotCol)
+            If ratio < minRatio Then
+                minRatio = ratio
+                pivotRow = i
+            End If
+        End If
+    Next i
+    SelectPivotRow = pivotRow
+End Function
+
+Sub PerformPivot(tableau As Variant, pivotRow As Integer, pivotCol As Integer, m As Integer, n As Integer)
+    Dim i As Integer, j As Integer
+    Dim pivotValue As Double
+    pivotValue = tableau(pivotRow, pivotCol)
+    For j = 1 To n + 1
+        tableau(pivotRow, j) = tableau(pivotRow, j) / pivotValue
+    Next j
+    For i = 1 To m + 1
+        If i <> pivotRow Then
+            Dim factor As Double
+            factor = tableau(i, pivotCol)
+            For j = 1 To n + 1
+                tableau(i, j) = tableau(i, j) - factor * tableau(pivotRow, j)
+            Next j
+        End If
+    Next i
+End Sub
+
+Function IsQuantitativeVariable(tableau As Variant, pivotRow As Integer, pivotCol As Integer, m As Integer, n As Integer) As Boolean
+    Dim i As Integer
+    For i = 1 To m
+        If i <> pivotRow And tableau(i, pivotCol) <> 0 Then
+            IsQuantitativeVariable = False
+            Exit Function
+        End If
+    Next i
+    IsQuantitativeVariable = True
+End Function
+
+
+
+
