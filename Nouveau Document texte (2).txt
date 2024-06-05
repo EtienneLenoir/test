@@ -1,0 +1,358 @@
+
+
+Dim cb As CommandBar
+Dim ddl As CommandBarComboBox
+Dim dateInput As CommandBarControl
+Dim chkBox As CommandBarButton
+
+Sub CreateCustomCommandBar()
+    On Error Resume Next
+    ' Supprimer la barre de commandes si elle existe déjà
+    Application.CommandBars("CustomBar").Delete
+    On Error GoTo 0
+    
+    ' Créer une nouvelle barre de commandes
+    Set cb = Application.CommandBars.Add(Name:="CustomBar", Position:=msoBarTop, Temporary:=True)
+    
+    ' Ajouter une liste déroulante
+    Set ddl = cb.Controls.Add(Type:=msoControlComboBox)
+    With ddl
+        .AddItem "Option 1"
+        .AddItem "Option 2"
+        .AddItem "Option 3"
+        .Style = msoComboNormal
+        .Caption = "Select Option"
+        .OnAction = "DropdownChange"
+    End With
+    
+    ' Ajouter un champ de saisie pour la date
+    Set dateInput = cb.Controls.Add(Type:=msoControlEdit)
+    With dateInput
+        .Caption = "Enter Date"
+        .Tag = "DateInput"
+        .OnAction = "DateChange"
+    End With
+    
+    ' Ajouter une case à cocher
+    Set chkBox = cb.Controls.Add(Type:=msoControlButton)
+    With chkBox
+        .Caption = "Toggle Option"
+        .Style = msoButtonIconAndCaption
+        .FaceId = 1957 ' Une icône quelconque
+        .OnAction = "ToggleOption"
+        .Tag = "CheckBox"
+    End With
+    
+    ' Afficher la barre de commandes
+    cb.Visible = True
+End Sub
+
+Sub DropdownChange()
+    Dim selectedOption As String
+    Set ddl = Application.CommandBars("CustomBar").Controls("Select Option")
+    selectedOption = ddl.Text
+    MsgBox "Selected option: " & selectedOption
+    ' Ajouter votre code pour traiter le changement de liste déroulante ici
+End Sub
+
+Sub DateChange()
+    Dim enteredDate As String
+    Set dateInput = Application.CommandBars("CustomBar").Controls("Enter Date")
+    enteredDate = dateInput.Text
+    MsgBox "Entered date: " & enteredDate
+    ' Ajouter votre code pour traiter le changement de date ici
+End Sub
+
+Sub ToggleOption()
+    Static isChecked As Boolean
+    isChecked = Not isChecked
+    If isChecked Then
+        MsgBox "Option is checked"
+    Else
+        MsgBox "Option is unchecked"
+    End If
+    ' Ajouter votre code pour traiter le changement de case à cocher ici
+End Sub
+
+Sub DeleteCustomCommandBar()
+    On Error Resume Next
+    Application.CommandBars("CustomBar").Delete
+    On Error GoTo 0
+End Sub
+
+
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+Dim previousSheet As Worksheet
+
+Private Sub Workbook_SheetActivate(ByVal Sh As Object)
+    ' Vérifie si la feuille précédente existe et n'est pas la feuille actuellement activée
+    If Not previousSheet Is Nothing And previousSheet.Name <> Sh.Name Then
+        ' Cache la feuille précédente
+        previousSheet.Visible = xlSheetVeryHidden
+    End If
+    ' Met à jour la feuille précédente avec la feuille actuellement activée
+    Set previousSheet = Sh
+End Sub
+
+Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
+    ' Cache la feuille désactivée
+    Sh.Visible = xlSheetVeryHidden
+End Sub
+
+
+
+""""""""""""""""""""""""""""""""""""""""""
+
+Sub SendEmailWithAttachmentAndFormattedRange()
+    Dim OutlookApp As Object
+    Dim OutlookMail As Object
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim TempFilePath As String
+    Dim TempFileName As String
+    Dim FileExtStr As String
+    Dim TempWB As Workbook
+    Dim rng As Range
+    Dim rngHTML As String
+
+    ' Définir la feuille de travail et la plage de données à inclure dans le corps de l'email
+    Set ws = ThisWorkbook.Sheets("NomDeVotreFeuille") ' Remplacez par le nom de votre feuille
+    Set rng = ws.Range("A1:D10") ' Remplacez par la plage de cellules que vous souhaitez inclure
+
+    ' Créer un classeur temporaire pour l'attachement
+    TempFilePath = Environ("TEMP") & "\"
+    TempFileName = "FeuilleTemp"
+    FileExtStr = ".xlsx"
+    
+    ' Copier la feuille de calcul dans un nouveau classeur
+    ws.Copy
+    Set TempWB = ActiveWorkbook
+
+    ' Sauvegarder le classeur temporaire
+    TempWB.SaveAs TempFilePath & TempFileName & FileExtStr
+    TempWB.Close False
+
+    ' Extraire les données de la plage au format HTML pour les inclure dans le corps de l'email
+    rngHTML = RangetoHTML(rng)
+
+    ' Créer une instance d'Outlook
+    Set OutlookApp = CreateObject("Outlook.Application")
+    Set OutlookMail = OutlookApp.CreateItem(0)
+
+    ' Configurer l'email
+    With OutlookMail
+        .To = "destinataire@example.com"
+        .CC = ""
+        .BCC = ""
+        .Subject = "Sujet de l'email"
+        .HTMLBody = "<p>Voici les données de la plage sélectionnée :</p>" & rngHTML & .HTMLBody
+        .Attachments.Add TempFilePath & TempFileName & FileExtStr
+        .Send
+    End With
+
+    ' Supprimer le fichier temporaire
+    Kill TempFilePath & TempFileName & FileExtStr
+
+    ' Nettoyer les objets
+    Set OutlookMail = Nothing
+    Set OutlookApp = Nothing
+    Set TempWB = Nothing
+    Set ws = Nothing
+    Set rng = Nothing
+End Sub
+
+Function RangetoHTML(rng As Range)
+    ' Copier la plage spécifiée comme tableau vers un fichier HTML temporaire
+    Dim fso As Object
+    Dim ts As Object
+    Dim TempFile As String
+    TempFile = Environ("TEMP") & "\" & "TempRange.htm"
+    
+    ' Copier la plage de cellules dans le presse-papiers
+    rng.Copy
+    
+    ' Créer un nouveau classeur temporaire pour recevoir les données
+    Set TempWB = Workbooks.Add(1)
+    TempWB.Sheets(1).Cells(1, 1).PasteSpecial Paste:=xlPasteAllUsingSourceTheme
+    
+    ' Sauvegarder le nouveau classeur en tant que fichier HTML temporaire
+    With TempWB.PublishObjects.Add( _
+         SourceType:=xlSourceRange, _
+         Filename:=TempFile, _
+         Sheet:=TempWB.Sheets(1).Name, _
+         Source:=TempWB.Sheets(1).UsedRange.Address, _
+         HtmlType:=xlHtmlStatic)
+        .Publish (True)
+    End With
+    
+    ' Lire le contenu du fichier HTML temporaire
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set ts = fso.GetFile(TempFile).OpenAsTextStream(1, -2)
+    RangetoHTML = ts.ReadAll
+    ts.Close
+    
+    ' Supprimer le classeur temporaire
+    TempWB.Close SaveChanges:=False
+    Kill TempFile
+
+    ' Nettoyer les objets
+    Set ts = Nothing
+    Set fso = Nothing
+    Set TempWB = Nothing
+End Function
+
+"""""""""""""""""""""""""""""""""""""""""""""
+
+' ColumnFinder.cls
+Option Explicit
+
+Private colDict As Object
+
+' Initialize the ColumnFinder
+Public Sub Initialize()
+    Set colDict = CreateObject("Scripting.Dictionary")
+End Sub
+
+' Populate or update the dictionary with column names and their respective numbers
+Public Sub Populate(sheetOrArray As Variant, isSheet As Boolean)
+    colDict.RemoveAll
+    If isSheet Then
+        PopulateFromSheet sheetOrArray
+    Else
+        PopulateFromArray sheetOrArray
+    End If
+End Sub
+
+' Populate the dictionary from a worksheet
+Private Sub PopulateFromSheet(sheet As Worksheet)
+    Dim col As Range
+    For Each col In sheet.Rows(1).Cells
+        If col.Value <> "" Then
+            colDict.Add col.Value, col.Column
+        End If
+    Next col
+End Sub
+
+' Populate the dictionary from an array
+Private Sub PopulateFromArray(arr As Variant)
+    Dim i As Long
+    For i = LBound(arr, 2) To UBound(arr, 2)
+        If arr(1, i) <> "" Then
+            colDict.Add arr(1, i), i
+        End If
+    Next i
+End Sub
+
+' Get the column number by name
+Public Function GetColumnNumber(columnName As String) As Long
+    If colDict.Exists(columnName) Then
+        GetColumnNumber = colDict(columnName)
+    Else
+        GetColumnNumber = -1 ' Return -1 if the column name does not exist
+    End If
+End Function
+
+
+'"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+' Module1.bas
+Option Explicit
+
+Public ColNumA As Long
+Public ColNumB As Long
+Public ColNumC As Long
+Public finder As ColumnFinder
+
+Sub InitializeFinder()
+    If finder Is Nothing Then
+        Set finder = New ColumnFinder
+        finder.Initialize
+    End If
+End Sub
+
+Sub FindAndSetColumnNumbers(sheetOrArray As Variant, isSheet As Boolean)
+    InitializeFinder
+    
+    ' Populate or update the finder
+    finder.Populate sheetOrArray, isSheet
+    
+    ' Set the global variables
+    UpdateGlobalVariables
+End Sub
+
+Sub UpdateGlobalVariables()
+    ColNumA = finder.GetColumnNumber("ColumnA")
+    ColNumB = finder.GetColumnNumber("ColumnB")
+    ColNumC = finder.GetColumnNumber("ColumnC")
+    
+    ' Optional: Display the column numbers
+    MsgBox "ColumnA is in column: " & ColNumA & vbCrLf & _
+           "ColumnB is in column: " & ColNumB & vbCrLf & _
+           "ColumnC is in column: " & ColNumC
+End Sub
+
+' Example usage:
+Sub ExampleUsageSheet()
+    FindAndSetColumnNumbers ThisWorkbook.Sheets("Sheet1"), True
+End Sub
+
+Sub ExampleUsageArray()
+    Dim arr As Variant
+    arr = Array(Array("ColumnA", "ColumnB", "ColumnC"), _
+                Array("Data1", "Data2", "Data3"))
+    FindAndSetColumnNumbers arr, False
+End Sub
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Standard & Poor's (S&P) 
+
+AAA : Investment Grade (IG) / Très bonne qualité
+AA+ : Investment Grade (IG) / Très bonne qualité
+AA : Investment Grade (IG) / Très bonne qualité
+AA- : Investment Grade (IG) / Très bonne qualité
+A+ : Investment Grade (IG) / Bonne qualité
+A : Investment Grade (IG) / Bonne qualité
+A- : Investment Grade (IG) / Bonne qualité
+BBB+ : Investment Grade (IG) / Qualité moyenne
+BBB : Investment Grade (IG) / Qualité moyenne
+BBB- : Investment Grade (IG) / Qualité moyenne
+BB+ : High Yield (HY) / Speculative / Bas de gamme
+BB : High Yield (HY) / Speculative / Bas de gamme
+BB- : High Yield (HY) / Speculative / Bas de gamme
+B+ : High Yield (HY) / Très spéculatif
+B : High Yield (HY) / Très spéculatif
+B- : High Yield (HY) / Très spéculatif
+CCC+ : High Yield (HY) / Hautement spéculatif
+CCC : High Yield (HY) / Hautement spéculatif
+CCC- : High Yield (HY) / Hautement spéculatif
+CC : High Yield (HY) / Très hautement spéculatif
+C : High Yield (HY) / En défaut avec possibilité de récupération
+D : In default (En défaut)
+
+
+
+Moody's Investors Service :
+Aaa : Investment Grade (IG) / Très bonne qualité
+Aa1 : Investment Grade (IG) / Très bonne qualité
+Aa2 : Investment Grade (IG) / Très bonne qualité
+Aa3 : Investment Grade (IG) / Très bonne qualité
+A1 : Investment Grade (IG) / Bonne qualité
+A2 : Investment Grade (IG) / Bonne qualité
+A3 : Investment Grade (IG) / Bonne qualité
+Baa1 : Investment Grade (IG) / Qualité moyenne
+Baa2 : Investment Grade (IG) / Qualité moyenne
+Baa3 : Investment Grade (IG) / Qualité moyenne
+Ba1 : High Yield (HY) / Speculative / Bas de gamme
+Ba2 : High Yield (HY) / Speculative / Bas de gamme
+Ba3 : High Yield (HY) / Speculative / Bas de gamme
+B1 : High Yield (HY) / Très spéculatif
+B2 : High Yield (HY) / Très spéculatif
+B3 : High Yield (HY) / Très spéculatif
+Caa1 : High Yield (HY) / Hautement spéculatif
+Caa2 : High Yield (HY) / Hautement spéculatif
+Caa3 : High Yield (HY) / Hautement spéculatif
+Ca : High Yield (HY) / Très hautement spéculatif
+C : High Yield (HY) / En défaut avec possibilité de récupération
+D : In default (En défaut)
