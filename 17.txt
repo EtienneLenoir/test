@@ -1,0 +1,47 @@
+conda create --name mydocs_env python=3.8
+conda activate mydocs_env
+
+
+conda install -c conda-forge mkdocs
+pip install mkdocs-material
+
+https://github.com/LSEG-API-Samples/Article.EikonCOMApi.VBA.EventDrivenFinancialCalculations
+
+https://github.com/LSEG-API-Samples/Tutorial.EikonAPI.Python.CompanyTearsheetEstimates/blob/master/README.md
+
+https://github.com/OsmanAdiguzel/EikonCOMApi.VBA.EventDrivenFinancialCalculations
+
+L'application Eikon est compilée en 32 bits. Lorsqu'Eikon est installé sur un ordinateur équipé de MS Office 32 bits, Visual Basic Editor installé avec Office est également utilisé par Eikon. Lorsqu'Eikon est installé sur une machine avec Office 64 bits, Visual Basic Editor installé avec Office ne peut pas être utilisé par Eikon en raison d'un nombre de bits incompatible (VBE 64 bits ne peut pas être chargé dans un processus Eikon 32 bits). Pour pouvoir utiliser VBA dans l'application Eikon, il faut installer VBA 32 bits en exécutant VBA71-32bit_CommonControl-32bit_x86.exe.
+
+
+Sub GetPricesFromEikon()
+    Dim EikonApp As Object
+    Dim ISINs As Variant
+    Dim i As Integer
+    Dim fieldName As String
+    Dim result As Variant
+    
+    ' Initialiser l'application Eikon
+    Set EikonApp = CreateObject("TRi.REFINITIV.App")
+    
+    ' Liste des ISINs
+    ISINs = Array("US0378331005", "US0231351067", "US5949181045") ' Ajouter vos ISINs ici
+    
+    ' Champ à récupérer (par exemple le prix de clôture)
+    fieldName = "TR.PriceClose"
+    
+    ' Boucle sur chaque ISIN et récupérer le prix
+    For i = LBound(ISINs) To UBound(ISINs)
+        result = EikonApp.GetData(ISINs(i), fieldName)
+        
+        ' Afficher le résultat dans la feuille Excel (par exemple dans la colonne A pour ISIN et B pour le prix)
+        Worksheets("Sheet1").Cells(i + 1, 1).Value = ISINs(i)
+        Worksheets("Sheet1").Cells(i + 1, 2).Value = result(fieldName)
+    Next i
+    
+    ' Libérer l'objet EikonApp
+    Set EikonApp = Nothing
+End Sub
+
+
+https://medium.com/lseg-developer-community/how-to-integrate-financial-data-from-python-to-excel-with-xlwings-part-2-c9332cf5a968
