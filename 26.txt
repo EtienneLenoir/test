@@ -1,0 +1,70 @@
+Sub InsertFormulasAndCopyValues()
+    Dim ws As Worksheet
+    Dim rng As Range
+    Dim formulas() As String
+    Dim outputRange As Range
+    Dim i As Long, j As Long
+    
+    ' Définir la feuille de calcul et la plage cible
+    Set ws = ThisWorkbook.Sheets("Feuil2")
+    Set outputRange = ws.Range("A1:D10") ' Modifier la plage selon vos besoins
+    
+    ' Initialiser le tableau de formules
+    ReDim formulas(1 To outputRange.Rows.Count, 1 To outputRange.Columns.Count)
+    
+    ' Stocker les formules dans le tableau
+    For i = 1 To UBound(formulas, 1)
+        For j = 1 To UBound(formulas, 2)
+            formulas(i, j) = "=RAND()" ' Exemple de formule, à remplacer par vos formules réelles
+        Next j
+    Next i
+    
+    ' Insérer les formules dans la plage cible
+    outputRange.FormulaLocal = formulas
+    
+    For Each cell In outputRange
+        cell.Value = cell.Value
+    Next cell
+    
+    
+    
+    Application.CalculateFull
+     
+    ThisWorkbook.RefreshAll
+    
+    ' Attendre que les formules soient mises à jour
+    Application.Calculate
+    DoEvents
+    
+    ' Copier les valeurs résultantes et coller en tant que valeurs
+    outputRange.Copy
+    outputRange.PasteSpecial Paste:=xlPasteValues
+    
+    ' Effacer le presse-papiers pour éviter de laisser des données inutiles
+    Application.CutCopyMode = False
+End Sub
+
+
+    Sub refreshSheet()
+        Application.Run "RefreshEntireWorksheet"  
+        Application.OnTime (Now + TimeValue("00:00:10")), "processSheet"
+    End Sub
+
+
+Public Sub Recalc()
+    Dim ws As Worksheet, FormulaCells As Range, c As Range
+    Application.Calculation = xlCalculationManual
+    For Each ws In ThisWorkbook.Worksheets
+        On Error Resume Next
+        ws.Activate
+        Set FormulaCells = ws.UsedRange.SpecialCells(xlCellTypeFormulas).Cells
+        If Err = 0 Then
+            For Each c In FormulaCells
+                c.Formula = Replace(c.Formula, "=", "=")
+            Next 'c
+        Else
+            Err.Clear
+        End If
+    Next 'ws
+    Application.Calculation = xlCalculationAutomatic
+End Sub
