@@ -1,0 +1,46 @@
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim ws1 As Worksheet
+    Dim ws2 As Worksheet
+    Set ws1 = ThisWorkbook.Sheets("Feuil1")
+    Set ws2 = ThisWorkbook.Sheets("Feuil2")
+    
+    ' Vérifiez si la cellule modifiée est la liste déroulante sur Feuil1
+    If Not Intersect(Target, ws1.Range("A1")) Is Nothing Then
+        Application.EnableEvents = False
+        ws2.Range("A1").Value = Target.Value
+        Application.EnableEvents = True
+    End If
+    
+    ' Vérifiez si la cellule modifiée est la liste déroulante sur Feuil2
+    If Not Intersect(Target, ws2.Range("A1")) Is Nothing Then
+        Application.EnableEvents = False
+        ws1.Range("A1").Value = Target.Value
+        Application.EnableEvents = True
+    End If
+End Sub
+
+Dans la fenêtre de code pour Feuil1, collez le code suivant :
+épétez cette étape pour Feuil2.
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Call SyncDropDowns(Target)
+End Sub
+
+
+
+
+Sub SyncDropDowns(ByVal Target As Range)
+    Dim ws1 As Worksheet
+    Dim ws2 As Worksheet
+    Set ws1 = ThisWorkbook.Sheets("Feuil1")
+    Set ws2 = ThisWorkbook.Sheets("Feuil2")
+
+    If Not Intersect(Target, ws1.Range("A1")) Is Nothing Then
+        Application.EnableEvents = False
+        ws2.Range("A1").Value = Target.Value
+        Application.EnableEvents = True
+    ElseIf Not Intersect(Target, ws2.Range("A1")) Is Nothing Then
+        Application.EnableEvents = False
+        ws1.Range("A1").Value = Target.Value
+        Application.EnableEvents = True
+    End If
+End Sub
