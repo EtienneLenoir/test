@@ -1,0 +1,373 @@
+L'objectif de la tarification des produits dérivés est de déterminer le juste prix d'un titre donné en termes de titres plus liquides dont le prix est déterminé par la loi de l' offre et de la demande . Le sens du mot "équitable" dépend, bien entendu, du fait que l'on envisage d'acheter ou de vendre le titre. Des exemples de titres évalués sont les options classiques et exotiques , les obligations convertibles , etc.
+
+Une fois qu'un prix équitable a été déterminé, le négociant côté vente peut créer un marché sur le titre. Par conséquent, la tarification des produits dérivés est un exercice « d'extrapolation » complexe pour définir la valeur marchande actuelle d'un titre, qui est ensuite utilisée par la communauté du côté vendeur. La tarification quantitative des dérivés a été initiée par Louis Bachelier dans The Theory of Speculation (« Théorie de la spéculation », publiée en 1900), avec l'introduction du processus le plus fondamental et le plus influent, le mouvement brownien , et ses applications à la tarification des options.
+
+
+Le mouvement brownien est un mouvement aléatoire qui est observé chez les particules en suspension dans un fluide, comme les particules de pollen dans de l'eau ou les molécules dans un gaz. Il a été décrit pour la première fois par Robert Brown en 1827.
+
+La démonstration mathématique du mouvement brownien est basée sur l'hypothèse que les collisions entre les particules en suspension et les molécules du fluide sont aléatoires et isotropes. Cela signifie que la probabilité de collision dans une direction particulière est la même que dans toutes les autres directions, et que les collisions ne sont pas corrélées dans le temps.
+
+
+La position d'une particule en suspension au temps t est décrite par un vecteur x(t) = (x(t), y(t), z(t)). On peut décrire le mouvement brownien en utilisant une équation différentielle stochastique pour x(t), qui est donnée par:
+
+dx(t) = μ(x(t))dt + σ(x(t))dW(t)
+
+où μ(x(t)) est la fonction de drift qui décrit la tendance moyenne de la particule à se déplacer dans une certaine direction, dt est l'intervalle de temps, σ(x(t)) est la fonction de diffusion qui décrit l'amplitude des fluctuations aléatoires dues aux collisions avec les molécules du fluide, et dW(t) est un terme stochastique qui décrit les fluctuations aléatoires du mouvement brownien.
+
+Cette équation différentielle est connue sous le nom d'équation de Langevin. Il peut être résolu en utilisant la méthode de la fonction de Green ou en utilisant des simulations numériques.
+
+Il est important de noter que cette démonstration est basée sur une série d'hypothèses et approximations qui peuvent ne pas être valides dans tous les cas. Il existe également d'autres modèles pour décrire le mouvement brownien, tels que le modèle de Fokker-Planck ou le modèle de Smoluchowski.
+
+Le mouvement brownien est dérivé en utilisant l' équation de Langevin discrète et la marche aléatoire .Bachelier a modélisé la série chronologique des variations du logarithme des cours boursiers comme une marche aléatoire finie dans laquelle les variations à court terme avaient une variance . Ainsi, les changements à plus long terme suivent une distribution gaussienne .
+
+La prochaine étape importante a été le théorème fondamental de l'évaluation des actifs par Harrison et Pliska (1981), selon lequel le prix courant convenablement normalisé P 0 d'un titre est sans arbitrage, et donc vraiment juste seulement s'il existe un processus stochastique P t constante à espérance qui décrit son évolution future 
+
+Un processus satisfaisant  est appelé une « martingale ». Une martingale ne récompense pas le risque. Ainsi, la probabilité du processus de prix normalisé des titres est appelée "neutre au risque" et est généralement désignée par la de police du tableau noir " lettre Q \mathbb {Q}". 
+
+De manière générale, la modélisation des changements par des distributions à variance finie est, de plus en plus, dite inappropriée. Dans les années 1960, il a été découvert par Benoit Mandelbrot que les changements de prix ne suivent pas une distribution gaussienne , mais sont plutôt mieux modélisés par les distributions alpha-stables de Lévy .  L'ampleur du changement, ou volatilité, dépend de la longueur de l'intervalle de temps à une puissance légèrement supérieure à 1/2. De grands changements à la hausse ou à la baisse sont plus probables que ce que l'on calculerait en utilisant une distribution gaussienne avec un écart type estimé . Mais le problème est qu'il ne résout pas le problème car il rend la paramétrisation beaucoup plus difficile et le contrôle des risques moins fiable
+
+Calcul differentielle et integrale sur des fct de processus stochastique.
+Processus de Poisson permettent de representer des sauts intervenants à des instants aléatoires et sont utilisés notamment pour modeliser le risque de crédit.
+
+Soit (Ω, F , P ) un espace de probabilité , T un ensemble d'indices et ( S , Σ) un espace mesurable . Soit X : T × Ω → S un processus stochastique (donc l'application 	
+$$
+ X_{t}:\Omega \to S:\omega \mapsto X(t,\omega ) \\
+\left(\Phi _{X}(\omega )\right)(t):=X_{t}(\omega ).
+$$
+
+# Définition de Base
+Un processus stochastique (ou processus aléatoire) est une variable qui dépend du temps et du hasard
+(suite de variable aléatoire indexé par le temps)
+
+Les variables et processus aléatoires seront désignés par des lettres capitales et les elements non aléatores de R par des petites lettres. Et souligenement denotera un vecteur $\underline{X}$ est un vecteur de ($X_1...X_n$).
+
+Un processus stochastique dépend de l'état du monde $\omega$ (l'ensemble des états du monde est $\Omega$)
+Il dépend en plus du temps, on notera $X(t, \omega)$ la valeur prise par un processus X en t.
+On considera les processus défini et observé à des instants particuliers (discret) et processus défini en tout t de l'intervalle de temps(continu) (0;T)   **(1)**.
+
+**L'état du monde $\omega$ doit etre interpreté comme l'histoire exhaustive du systeme étudié entre 0 et T.**
+Pour $\omega$ donnée toutes les réalistions du processus X(t,$\omega$) sont connus. (pour $\omega$ donné X(t,$\omega$)=$X_\omega(t)$), est une simple fct du temps (sans caractere aléatoire), et s'appele aussi trajactoire (c'est donc une suite discrete ou continu de réalisations de X, peut etre represente par plan ou espace si n-dimensionnel)
+De meme pour un t donné X(t,$\omega$)=$X_t(\omega)$ est une simple variable aléatoire
+
+**(1) Formellement c'est une application X mesurable de (0;T)X $\Omega$ dans $\mathbb{R^n}$ ou $\Omega$ est l'espace probalisé muni d'une $\sigma$-algebra et d'une mesure de proba.* 
+
+*La $\sigma$-algebra est répresentatif du systeme d'information disponible en t; l'enrichissement du système d'information au cours du temps est réprésenté par une suite $F_t$ de $\sigma$-algebra emboités ($F_0  	\subseteq F_1...)$ que l'on appelle **filtration**, un processus est dit adaptés ou  $F_t-mesurables$ càd $\forall$ t la variable aléatoire X(t,..) est connu en t càd mesurable par rapport à $F_t$*
+
+*Au fur et à mesure que le temps s'écoule l'information s'enrichit, l'incertitude se réduit, l'ensemble de l'information disponible t est $F_t$, à partir de ça sont formés les proba conditionelles concernant le futur $E(X(T)|F_t)$*
+
+#  Processus sans mémoire
+Soit un processus X(t), et une suite arbitaire d'instant sucessifs $(t_0,t_1...t_{m-1})$  	$\in$ (0;T), et des nb réels $x_0,x_1...x_{m-1})$, et la proba que $X(t_m)$ soit inferieur ou égale à x sachant que $X(t_{m-1})=x_{m-1}$
+nous écrivons cette proba conditionelle :
+$$
+Proba (X(t_m) \leq x | X (t_{m-1})= x_{m-1} \\
+$$
+**Un processu sans mémoire est par définition caracterisé par des proba conditionelle de $X(t_m)$ qui quels que soit x et la suite $(t_0..t_m$) ne dépendent que de $(x_{m-1},t_{m-1})$**
+$$
+Proba (X(t_M) \leq x | X (t_{m-1})= x_{m-1}= F(x_{m-1},t_{m-1};x,t_m)
+$$
+**Cette proba de passage de l'état $x_{m-1}$ à $t_{m-1}$ s'appelle la probabilité de transition**
+
+Un processus sans mémoire est que la réalisation la plus récente contient toute l'information pertinente pour l'élaboration des proba du futur.
+
+***"Le passé n'influence l'avenir que par l'intermédaire du présent"*** 
+
+#  Processus de Markov
+
+Un processus de Markov est un processus sans mémoire dont les probabilités de transition respectent certaines conditions techniques
+- $F(x_s,s..t)$ est une fct mesurable par rapport $\sigma$-algebra $F_t$ et les boréliens de $\mathbb{R^n}$
+- l'équation suivante de Chapman Kolmogorov est satisfaite pour r<s<t
+$$
+F(x,r;z,t)= E \int_{y} 
+f(\underline{y},s,\underline{z},t)dF(\underline{x},r,\underline{y},z)
+$$
+Cette équation signifie que la proba que X passe de (r,x) à (t<z) est égale la somme des probas de toutes les trajectoires passant en s par tout les etats intermédaires y possibles et aboutissant en t à une valeur <z
+
+#  Processus Stationaires
+Les procesessus stationaires sont si leurs fct de distribution est invariante pour toute translation dans le temps.
+Ou encore si proba de transition $Proba (X(t_t) \leq x_t | \underline{X}(s))=x_s$ s'écrivent pour tout s et et appartient (0;T), avec s<t comme des fonctions $(\underline{x_s},\underline{x_t},t-s)$
+
+#   Le mouvement Brownien
+
+La notion de MB a été introduit en 1829 par le botaniste Robert Brown pour décrire les mouvements de particules de pollen en suspension de l'eau. Et en 1900 Louis bachelier le théorise pour les variations des cours de Bourse dans sa these *"Théorie de la spéculation"*. Puis 70 ans plus tard Samuelson, Merton le redécouvre
+
+
+**Processus brownien peut etre utilisé quand le mouvement d'un système imprime une force constante (le drift) perturbé par des chocs aléatoires successifs, continues et indépendants dans le temps qui impriment des mouvements gaussiens erratiques**
+
+# Le Mvt BW unidimensionnel
+
+Considérons un mvt markovien unidimensionnels observé à des instants régulierement espacés $(X(0), X(1)..)$ à acroissements $X(t)-X(t-1)$ normale iid dont l'esperence est $\mu$ et ecart type $\sigma$.
+
+D'apres les caracteristiques du processus les U(t) sont des variables normales centrés réduites et iid
+$$
+U(t+1)= \frac{X(t+1)-X(t)-\mu}{\sigma} \\
+\text{les accroissements } X(i)-X(i+1) \text{étant gaussien et independants} \\
+
+E(X(t)-E(X(0))= \mu t ; \\
+var(X(t))= \sigma^2 t ; \\
+\text{donc distribué selon } N(\mu t, \sigma^2 t) 
+$$
+Processus appelé auto-regressif du 1er ordre($var (X(t))= \sigma^2$ économetrie)
+Le mvt Bw est une limite en passant en temps continu
+
+## Définition du Mvt BW arithmetique
+Soit un processus X(t) défini en temps continu
+ est nn mvt Bw arithmétique si :
+- X(t)-X(0) est gaussien selon loi N($\mu t$,$\sigma^2 t$)
+- ses accroissements sont independants (ne depend pas des evenements survenus jusqu'à s)
+$$
+E(X(t)-X(s))= \mu (t-s) \\
+Var(X(t)-X(s))=\sigma^2 (t-s) \\
+\text{si } s<t \\
+Cov(X(s),X(t))= Var(X(s))= \sigma^2 S \\
+X(t+ \Delta t)- X(t) =\Delta X= \mu\Delta t+ \sigma \sqrt{ \Delta t}U(t)
+$$
+Le mvt Bw est markovien,stationaire, à trajectoire continu, et accroisement ont esperence et variance proportionelle à la durée de l'intervalle sur lequel ils sont calculés
+
+## Définition Mvt BW  Standard ou Processus de Wiener
+C'es un mvt Bw arithmétique dont accroissements ont une esperence nulle et une variance par unité de temps $\sigma^2=1$, il est noté W(t) et $W(0)=0$
+
+- $W(0)=0$
+- $W(t)$ distribué selon $N(0,t)$ et son accroissement $\Delta W=W(t+dt)-W(t)=N(0,\Delta t)$
+- $W(t)$ est une martingale $E(W(t)|W(s))=W(s)$
+-  $W_{t}$est continue dans t t.
+
+*De manière plus génerale l'accroissement $W(t)-W(s)$ né dépend d'aucun évenement antérieur à s de ce fait on peut écrire $E(W(t)-E(W(s)|F_s)=0$*
+$$
+E[Z(t)^2]=var(Z(t))+E[Z(t)]^2=t\\
+E[Z(t)Z(s)]=min(t,s) \\
+cov(w_1,w_2)=E[w_1 w_2]
+$$
+**Bw standard joue role analogue à celui de la variable normale centré réduite à l'égard des variables normales d'esperence et variance quelconque.
+on peut exprimer un mvt brownien arithmétique $X(t)$ de paramètre $\mu$ et $\sigma$ en fct d'un processus de Wiener W(t)** 
+$$ 
+W(t)= \frac{X(t)-\mu t}{\sigma} \\
+X(t)= \mu t+ \sigma W(t) \\
+\Delta X(t)=\mu \Delta t+ \sigma \Delta W \\
+\text{puisque } \Delta W \text{est} N(0, \Delta t) \text{ cette accroissement s'exprime en fct d'une variable normale standard $U$}\\
+\Delta W= \sqrt{ \Delta t}U(t)
+$$
+
+- L'esperence mathématique de la longeur du trajet suivi  par W dans tout intervalle de temps est infinie.
+
+![41a05072be2e3643ecba558acfeb273a.png](:/6b58d8f8210b4f6ca3982a48aac93eba)
+
+
+###  Continuité
+comme $Var(\Delta W)=E[(\Delta W)^2]= \sigma^2 \Delta t$ tends vers 0 quand t tend vers 0, trajactoire est continu au sens quadratique
+et comme $\forall$ $\epsilon$ >0 $\lim_{\Delta n \rightarrow 0}$ Proba(|$\Delta$ W >$\epsilon$ )=0 et comme $\Delta w$ est normale et centré sur  et sa variance tend sur  quand $\Delta t$ tend vers 0; ceci annule toute proba de saut centrée sur 0
+
+continu mais non dérivable
+
+###  Résultat
+Comme les processus X(t) et W(t) sont continus on peut écrire sur un intervalle infinitésimal, sous la forme differentielle :
+$$
+dX(t)=\mu dt+ \sigma dW(t) 
+$$
+Composé d'une composante deterministe (drift) $\mu dt$ et composante stochastique $\sigma dW(t)$,$\sigma$ appellé paramètre de diffusion 
+Cette EDS a pour solution :
+$$
+X(t)-X(0)=\int_{0}^t \mu ds+\int_{0}^t  \sigma dW(s)=\mu t+ \sigma W(t)
+$$
+puis l'ED0 :
+$$
+X(t)-X(0)=\int_{0}^t \mu ds=\mu t \\
+\int_{0}^t  \sigma dW(s)=\sigma \int_{0}^t dW(s)= \sigma W(t) 
+$$
+Car $\int_{0}^tdW(s)=\sigma W(t)$ représente la somme des accroissement de W entre 0 et t car $\sigma$ est cst
+###  proprieté du mouvement Brownien
+
+- structure fractale (forme spatiale d'invariance ou de symétrie reliant le tout à ces parties)
+- $(dw)^2=dt=Var(dW)$
+- $dW.dt=0$
+- $dw_{t1}dw_{t2}=p_{12}dt=Cov(dw_1dw_2)$
+- $dW(t_1).dW(t_1)=0$ si $t_1$ pas égale à $t_2$
+
+$$
+\Delta W = \sqrt{ \Delta t}U ; (dW)^2= dt U^2 \\
+Var((dW)^2)=(dt)^2Var(U^2)=2(dt)^2 \\
+E[dW(t)^2]=dt\\
+Var(U^2)=E(U^4)-E(U^2)^2=3-1 \\
+\text{car }  E(U^2)=Var(U)=1 \text{ et } E(U^4)=3
+$$
+
+**Règles Heucaristique :**
+$$
+dX^2= \sigma^2 dt \text{ car on retient que ordre 1 de EDS} \\
+dX.dt=0 \\
+dX_1(t)dX_2(t)=cov(dX_1(t),dX_2(t))=\sigma_{12} dt
+$$
+
+#  Processus d'Ito Unidimensionnels
+
+Processus plus géneral que mvt Bw dont coeff de drift et diffusion sont eux memes stochastiques
+$$
+\text{Processus d'Ito:} \\
+dX=\mu(t) dt+ \sigma(t) dW(t) \\
+X(t)-X(0)=\int_{0}^t \mu (s) ds+\int_{0}^t  \sigma (s) dW(s)
+$$
+Les 2 integrales de droite sont eux meme des processus stochastiques adaptés, sous certaines conditions requises...une solution existe.
+**Les processus d'Ito sont continus partout et dérivables nulle part, contrairement au Bw, ils sont pas nécessairement markoviens** car $\mu$ et $\sigma$ dépendent de toute l'historique précedant la date t (pas processus sans mémoire)
+
+## Existance
+
+Soit $I_1$ integrale de droite réecrivons de manière plus explicite avec caractère aléatoire  $I_1(\omega,t)=\int_{0}^{t} \mu (\omega , s)ds$
+
+pour un w donné $\mu (w,s)$ est une fct deterministe du temps répresentative d'une trajectoire particuliere:
+$I_1=\int_{0}^t \mu (s) ds$ est défini au sens habituel de Riemann.
+
+La deuxieme integral $I_2$ est plus délicate, il s'agit de définir $I_2$ ou $Y(t)$ est un processus stochastique et de spécifier les conditions à imposer à $Y(t)$. on peut la définir au sens d'une **integrale de Stieljes** en suivant la méthode standard qui consiste à partir d'une partition de ($t_{0}=0,..,t_{k-1},t_{k}..t_{m}=t)$ de l'intervalle $(0,t)$ à considerer les sommes de Rienman
+$$
+I_2=\int_{0}^t Y(s)dW(s) \\
+S_m= \sum_{k=1}^m Y(t_k*)(W(t_k)-W(t_{k-1})) \\
+\text{integrale d'Ito:} \\
+S_m= \sum_{k=1}^m Y(t_{k-1})(W(t_k)-W(t_{k-1}))
+$$
+I est la limite de $S_m$ (p.s ou quadratique) qd partition devient de plus en plus fine( m tendant vers l'infini et sup$(t_k-t_{k-1}$) tends vers 0).$S_m$ converge si processus Y(t) satisfait certaine conditions.
+
+En résume processus d'ito est défini si $\mu(t)$ et $\sigma (t)$ sont deux processus adaptés satisfaisant des condtion d'integrabilités sur des integrales non stochastiques :
+$$
+E(\int_{0}^t |\mu (s)|ds) < \infty \\
+E(\int_{0}^t |\sigma^2 (s)|ds) < \infty
+$$
+
+(limite ps implique quandratique)
+
+**Integrale de Rienman converge dans R, alors que integrale d'Ito approché par des séquences de variables aléatoires qui convergent dans $L^2$(l'espace de v.a de carré integrables (variance fini))**
+
+# Définition Processus de Diffusion unidimensionnels
+
+
+Avec des coeff(dérive et diffusion) déterministe du temps et de la valeur courante du processus $\mu (t,X(t)$, $\sigma (t,X(t))$. Les proccesus de diffusion sont markovien
+$$
+\text{processus de diffusion: } \\
+
+dX=\mu (t,X(t)) dt+ \sigma (t,X(t)) dW(t) \\
+X(t)-X(0)=\int_{0}^t \mu (t,X(s)) ds+\int_{0}^t  \sigma (t,X(s)) dW(s)
+$$
+
+Tout comme les browniens dont ils sont dérivés et les processus d'Ito dont ils sont un cas particulier, les processus de diffusion sont continus partout et dérivables nulle part. A l'instat des browniens et contrairement à certains processus d'Ito, les processus de diffusion sont markoviens car les coeffs $\mu(t,X(t))$ et $\sigma (t,X(t))$ dont les accroissements de X après la date t, ne dépendent que du dernier état $(t,X(t)$)
+
+***Exemple 1: Le mouvement Brownien géometrique***
+Un MBG est un processus X obeissant à l'EDS
+$dX=\mu X dt +\sigma XdW$
+**Les coeffs sont cst**, cette EDS un est un cas particulier avec $\mu(t, X(t))=\mu X(t)$ et $\sigma (t,X(t))=\sigma X(t)$
+
+***Exemple 2: Le processus d'Ornstein-Uhlenbeck***
+Ce processus qui est parfois utilisé pour répresenter l'évolution du taux d'interet à court terme, suit une EDS qui s'écrit
+$dX(t)=a[b-X(t)]dt+\sigma dW(t)$
+
+
+## processus diffusion contrainte
+Les conditions d'integrabilité sont que $\mu(t,x)$ et $\sigma (t,x)$ doivent etre Lipschitiziennes càd, il existe 2 cst c et k tel que pour tout x,y,t appartient (0,T):
+$$
+|\mu (t,x)-\mu (t,y) < K |x-y| 
+$$
+
+
+
+##  Proprieté integrales stochastique d'ito
+$$
+
+E(\int_{s}^t \mu (u)du|F_s) =0 \text{ car } E(dw(u)|F_s)=0 \\
+E(I(t)|F_s)=E(I(t)|I(s))=I(s) (It-martingale)
+$$
+
+# La differenciation d'une fct d'un processus d'Ito: Le lemme d'ito
+Dans le cas d'une fct differentiable ordinaire $f(t,x)$ de 2 variables $t$ et $X$ deterministe, la différentielle de f s'écrit :
+$$
+df=\frac{\partial f}{\partial t} dt +\frac{\partial f}{\partial X} dX
+$$
+**Cette regle n'est pas valide quand X est un processus stochastique**
+
+
+$F(t,X(t))$ represente le prix de l'option et $X(t)$ celle de son SJ. On considere l'intervalle $(t,t+dt)$ au cours duquel $X$ varie de $dX=X(t+dt)-X(t)$, et $df=(t+dt,X(t+dt))-f(t,X(t)))$ la variation induite par la double variation infinitésimale.
+$(.)$ répresentera $(t,X(t))$
+$$
+dX=\mu(t) dt+ \sigma(t) dW(t) \\
+\text{ Lemme d'ito:} \\
+df=\frac{\partial f}{\partial t} (.)dt +\frac{\partial f}{\partial x}(.)dX+ \frac{1}{2}\frac{\partial^2 f}{\partial^2 x}(dX)^2 \\
+\text{or } dX^2=\sigma (t)^2dt \\
+df=(\frac{\partial f}{\partial t} (.) +\frac{1}{2}\frac{\partial^2 f}{\partial^2 x}(.)\sigma (t)^2)dt +\frac{\partial f}{\partial x}(.)dX \\
+\text{avec } dX=\mu(t) dt+ \sigma(t) dW(t) \\
+df=(\frac{\partial f}{\partial t} (.)+\frac{\partial f}{\partial x} (.)\mu (t) +\frac{1}{2}\frac{\partial^2 f}{\partial^2 x}(.)\sigma (t)^2)dt +\frac{\partial f}{\partial x}(.)\sigma (t) dW
+$$
+C'est en fait le developpement en série de taylor pr fct à 2 variables pour la premiere équation en supprimant tout les termes d'ordre >1.
+$(dX)^2$ est du 1er ordre en calcul stochastique et absent car 2 ordre en calcul différentiel ordinaire
+$$
+\Delta f=\frac{\partial f}{\partial t } (.) \Delta t+\frac{\partial f}{\partial x } (.)\Delta X+\frac{1}{2}\frac{\partial^2 f}{\partial^2 x } (.)\Delta X^2+\frac{1}{2}\frac{\partial^2 f}{\partial^2 t } (.)\Delta t^2+\frac{\partial^2 f}{\partial x\partial t  } (.)\Delta X \Delta t+\epsilon
+$$
+$$
+\text{Lemme d'Ito} \\
+d(f(X_t,t))=\frac{\partial f}{\partial t}(X_t,t)dt+\frac{\partial f}{\partial x}(X_t,t)dX_t+\frac{1}{2}\frac{\partial^2 f}{\partial x^2}(X_t,t)\sigma^2 dt	
+
+$$
+
+**autre démo**
+$$
+\text{Soit x un processus de diffusion} \\
+dx=a(x,t)dt+b(x,t)dz \\
+\text{Soit G une fct de x et t} \\
+dG=(\frac{\partial G}{\partial t}+\frac{\partial G}{\partial x}a+\frac{1}{2}\frac{\partial^2G }{\partial^2 x}b^2)dt+\frac{\partial G}{\partial x} bdz
+$$
+# Le mouvement Brownien géometrique
+MBG souvent utlisé pour representer les variations du cours des actions car log normalité compatible..(action peut pas etre négatif)
+$$
+\frac{dX}{X}=\mu dt+ \sigma dW
+$$
+
+- $ln(X(t))$ obéit à un mvt brownien arthmétique dont la dérive est $\mu- \frac{\sigma^2}{2}$ et la variance instantanée est $\sigma^2$
+-  $X(t)$ est une variable log-normale qui s'écrit :  
+$\\X(t)=X(0)e^{\mu- \frac{\sigma^2}{2}+\sigma W(t)}$
+- L'esperence de $X(t)$ croit exponentiellement aux taux $\mu$
+$$
+\text{on applique lemme d'ito }dln(X)= \frac{dX}{X}-\frac{1}{2}\frac{dX^2}{X^2} \\
+\text{Avec EDS plus que } \frac{dX^2}{X^2}=\sigma^2 dt \\
+\text{on peut écrire } dln(X)=(\mu- \frac{\sigma^2}{2}) dt+ \sigma dW \\
+\text{car } \frac{dX}{X}=\mu dt+ \sigma dW \\
+ln(S_T)=\approx \phi(lnS_0+(\mu- \frac{\sigma^2}{2})T,\sigma \sqrt{t}) \\
+E(X(t))=X(0)E[e^{(\mu- \frac{\sigma^2}{2})t+\sigma \sqrt{t}U}]
+$$
+
+# Processus Ito multivarié
+$$
+\underline{X}(t)-\underline{X}(0)= \int_{0}^t \underline{\mu}(s) ds+ \int_{0}^t \Sigma (s)  d\underline{W}(s)
+$$
+$\Sigma$ est la matrice de diffusion (ou co-volatilié, nXm), dont chacune des nm composantes $\sigma{ij}(t)$ est un processus adapté.
+La ieme composante s'écrit :
+$$ dX_i=\mu_i(t)+ \sum_{j=1}^{m} \sigma_{ij} (t) dW_j $$
+
+## Lemme d'ito multidimensionnel
+Soit $X(t)$ un processus d'ito multivarié ((.) signifi (t, X(t))
+$$
+df= \frac{\partial f}{\partial t} (.) dt +\sum_{i}^{n}\frac{\partial f}{\partial x_i}(.)dX_i +\sum_{i}^{n}\sum_{j}^{n} \frac{1}{2}     \frac{\partial^2 f}{\partial x_i \partial x_j}(.)dX_i dX_j
+$$
+Ce qui implique :
+$$
+df=(\frac{\partial f}{\partial t} (.) dt+\sum_{i}^{n}\sum_{j}^{n} \frac{1}{2}     \frac{\partial^2 f}{\partial x_i \partial x_j}(.)v_{ij}+\sum_{i}^{n} \mu_{i} (.)\frac{\partial f}{\partial x_i} (.))dt \\+\sum_{i}^{n}\sum_{j}^{n}\frac{\partial f}{\partial x_i} \sigma_{ij} (.)dW_{j}
+$$
+
+$v_{ij} dénote l'élement géneral de la matrice $v_{ij}=\sum_{k=i}^{m}  \sigma_{ik}\sigma_{jk}$
+
+## LOperateur de Dynkin
+Pour simplifier EDS et du lemme d'ito
+$$
+\text{dans cas unidimentionelle} \\
+Edf=(E(f(t+dt,\underline{X}(t+dt))-f(t,\underline{X})) \\
+Edf=(\frac{\partial f}{\partial t} (.)+\frac{\partial f}{\partial x} (.)\mu (t) +\frac{1}{2}\frac{\partial^2 f}{\partial^2 x}(.)\sigma (t)^2)dt \\
+\text{dans cas multidimensionnel} \\
+Edf=(\frac{\partial f}{\partial t} (.)+\sum_{i=i}^{n}\frac{\partial f}{\partial x_i} (.)\mu_i (t) + \sum_{i=i}^{n} v_{ij}\frac{1}{2}\frac{\partial^2 f}{\partial x_i\partial x_j}(.))dt
+$$
+
+Par exemple il s'écrit operateur $D^t$ ( Dynkin ou operteur differentiel):
+$$
+df=D^t+\sum_{i}^{n}\sum_{j}^{n}\frac{\partial f}{\partial x_i} \sigma_{ij} (.)dW_{j}
+$$
+
+
+![9c1fc03c803ffadb7512c9a8840662be.png](:/67d57ae9c12d4bc38615473b011a5f3d)
+
+
+![f7d08bd53151e0c937e2df4a7ff7ecf0.png](:/08442853e90b4e1eb7ad836437e542c9)
+
+
+
