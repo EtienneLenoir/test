@@ -1,0 +1,234 @@
+Sub ImporterDonneesNouvelleInstanceUltraRapide()
+    Dim cheminFichier As String
+    Dim xlApp As Object
+    Dim wbExterne As Workbook
+    Dim wsSource As Worksheet
+    Dim wsDestination As Worksheet
+    Dim data As Variant
+    Dim lastRow As Long
+    Dim lastCol As Long
+
+    ' Définir la feuille de destination (la feuille active dans ce cas)
+    Set wsDestination = ThisWorkbook.ActiveSheet
+    
+    ' Spécifier le chemin du fichier externe
+    cheminFichier = Application.GetOpenFilename("Fichiers Excel (*.xlsx), *.xlsx")
+
+    ' Vérifier si l'utilisateur a sélectionné un fichier
+    If cheminFichier = "Faux" Then Exit Sub
+
+    ' Créer une nouvelle instance d'Excel
+    Set xlApp = CreateObject("Excel.Application")
+    xlApp.Visible = False ' Rendre la nouvelle instance invisible
+
+    ' Optimisation de l'instance cachée : désactiver les fonctionnalités inutiles
+    xlApp.ScreenUpdating = False
+    xlApp.EnableEvents = False
+    xlApp.DisplayAlerts = False
+    xlApp.Calculation = xlCalculationManual
+
+    ' Ouvrir le fichier externe en arrière-plan dans la nouvelle instance
+    Set wbExterne = xlApp.Workbooks.Open(Filename:=cheminFichier, ReadOnly:=True, UpdateLinks:=False, IgnoreReadOnlyRecommended:=True)
+
+    ' Définir la feuille source (ici la première feuille du fichier externe)
+    Set wsSource = wbExterne.Sheets(1)
+
+    ' Trouver la dernière ligne et colonne utilisée sur la feuille source
+    With wsSource
+        lastRow = .Cells(.Rows.Count, 1).End(xlUp).Row
+        lastCol = .Cells(1, .Columns.Count).End(xlToLeft).Column
+    End With
+
+    ' Copier les données dans un tableau en mémoire (manipulation hors interface Excel)
+    data = wsSource.Range(wsSource.Cells(1, 1), wsSource.Cells(lastRow, lastCol)).Value
+
+    ' Fermer le fichier externe immédiatement après avoir récupéré les données
+    wbExterne.Close False
+
+    ' Coller les données sur la feuille active du fichier en cours
+    wsDestination.Range("A1").Resize(UBound(data, 1), UBound(data, 2)).Value = data
+
+    ' Quitter l'instance Excel cachée et libérer la mémoire
+    xlApp.Quit
+    Set xlApp = Nothing
+
+    MsgBox "Données importées avec succès à une vitesse maximale!"
+End Sub
+
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Sub ImporterDonneesViaSQLOptimisé()
+    Dim cheminFichier As String
+    Dim cn As Object
+    Dim rs As Object
+    Dim wsDestination As Worksheet
+    Dim sqlQuery As String
+    Dim data As Variant
+    Dim i As Long, j As Long
+    Dim nbRows As Long, nbCols As Long
+    
+    ' Définir la feuille de destination (la feuille active dans ce cas)
+    Set wsDestination = ThisWorkbook.ActiveSheet
+
+    ' Spécifier le chemin du fichier Excel externe
+    cheminFichier = Application.GetOpenFilename("Fichiers Excel (*.xlsx), *.xlsx")
+    
+    ' Vérifier si l'utilisateur a sélectionné un fichier
+    If cheminFichier = "Faux" Then Exit Sub
+
+    ' Créer une connexion à ADO (ActiveX Data Objects)
+    Set cn = CreateObject("ADODB.Connection")
+    Set rs = CreateObject("ADODB.Recordset")
+    
+    On Error GoTo CleanFail ' Gestion des erreurs pour nettoyage
+
+    ' Construire la chaîne de connexion à utiliser pour lire le fichier Excel comme une base de données
+    cn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & cheminFichier & ";Extended Properties=""Excel 12.0 Xml;HDR=Yes;IMEX=1"";"
+    
+    ' Définir la requête SQL (ici, pour extraire toutes les données de la première feuille)
+    sqlQuery = "SELECT * FROM [Sheet1$]" ' Remplacez "Sheet1" par le nom de la feuille si besoin
+
+    ' Exécuter la requête SQL et récupérer les résultats dans l'objet Recordset
+    rs.Open sqlQuery, cn, 0, 1 ' 0=adOpenForwardOnly, 1=adLockReadOnly pour meilleure performance
+
+    ' Vérifier s'il y a des données
+    If Not rs.EOF Then
+        ' Copier les données dans un tableau en mémoire pour traitement plus rapide
+        data = rs.GetRows() ' Copie toutes les données dans un tableau
+        nbCols = UBound(data, 1) + 1 ' Nombre de colonnes
+        nbRows = UBound(data, 2) + 1 ' Nombre de lignes
+
+        ' Transférer toutes les données en une seule opération
+        wsDestination.Range("A1").Resize(nbRows, nbCols).Value = Application.Transpose(Application.Transpose(data))
+    End If
+
+CleanExit:
+    ' Fermer et nettoyer les objets
+    If Not rs Is Nothing Then
+        If rs.State = 1 Then rs.Close
+        Set rs = Nothing
+    End If
+    If Not cn Is Nothing Then
+        If cn.State = 1 Then cn.Close
+        Set cn = Nothing
+    End If
+    MsgBox "Les données ont été importées avec succès via SQL!"
+
+    Exit Sub
+
+CleanFail:
+    MsgBox "Une erreur est survenue: " & Err.Description
+    Resume CleanExit
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''
+Sub ImporterDonneesViaSQLOptimiséSansTranspose()
+    Dim cheminFichier As String
+    Dim cn As Object
+    Dim rs As Object
+    Dim wsDestination As Worksheet
+    Dim sqlQuery As String
+    Dim data As Variant
+    Dim i As Long, j As Long
+    Dim nbRows As Long, nbCols As Long
+    Dim tableauFinal() As Variant
+    
+    ' Définir la feuille de destination (la feuille active dans ce cas)
+    Set wsDestination = ThisWorkbook.ActiveSheet
+
+    ' Spécifier le chemin du fichier Excel externe
+    cheminFichier = Application.GetOpenFilename("Fichiers Excel (*.xlsx), *.xlsx")
+    
+    ' Vérifier si l'utilisateur a sélectionné un fichier
+    If cheminFichier = "Faux" Then Exit Sub
+
+    ' Créer une connexion à ADO (ActiveX Data Objects)
+    Set cn = CreateObject("ADODB.Connection")
+    Set rs = CreateObject("ADODB.Recordset")
+    
+    On Error GoTo CleanFail ' Gestion des erreurs pour nettoyage
+
+    ' Construire la chaîne de connexion à utiliser pour lire le fichier Excel comme une base de données
+    cn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & cheminFichier & ";Extended Properties=""Excel 12.0 Xml;HDR=Yes;IMEX=1"";"
+    
+    ' Définir la requête SQL pour extraire les données de la première feuille
+    sqlQuery = "SELECT * FROM [Sheet1$]" ' Adapter en fonction du nom de la feuille
+
+    ' Exécuter la requête SQL et récupérer les résultats dans l'objet Recordset
+    rs.Open sqlQuery, cn, 0, 1 ' 0=adOpenForwardOnly, 1=adLockReadOnly pour meilleure performance
+
+    ' Vérifier s'il y a des données
+    If Not rs.EOF Then
+        ' Copier les données dans un tableau en mémoire pour traitement plus rapide
+        data = rs.GetRows() ' Copie toutes les données dans un tableau
+        nbCols = UBound(data, 1) + 1 ' Nombre de colonnes
+        nbRows = UBound(data, 2) + 1 ' Nombre de lignes
+
+        ' Redimensionner le tableau final
+        ReDim tableauFinal(1 To nbRows, 1 To nbCols)
+
+        ' Remplir le tableau final avec les données sans transposer
+        For i = 0 To nbCols - 1
+            For j = 0 To nbRows - 1
+                tableauFinal(j + 1, i + 1) = data(i, j)
+            Next j
+        Next i
+
+        ' Transférer toutes les données en une seule opération
+        wsDestination.Range("A1").Resize(nbRows, nbCols).Value = tableauFinal
+    End If
+
+CleanExit:
+    ' Fermer et nettoyer les objets
+    If Not rs Is Nothing Then
+        If rs.State = 1 Then rs.Close
+        Set rs = Nothing
+    End If
+    If Not cn Is Nothing Then
+        If cn.State = 1 Then cn.Close
+        Set cn = Nothing
+    End If
+    MsgBox "Les données ont été importées avec succès via SQL sans transposition!"
+
+    Exit Sub
+
+CleanFail:
+    MsgBox "Une erreur est survenue: " & Err.Description
+    Resume CleanExit
+End Sub
+
+''''''''''''''''''''''''''''
+Sub ImporterViaPowerQuery()
+    Dim cheminFichier As String
+    Dim req As WorkbookQuery
+    Dim wsDestination As Worksheet
+    
+    ' Définir la feuille de destination
+    Set wsDestination = ThisWorkbook.ActiveSheet
+
+    ' Spécifier le chemin du fichier Excel source via un dialogue
+    cheminFichier = Application.GetOpenFilename("Fichiers Excel (*.xlsx), *.xlsx")
+    
+    ' Vérifier si l'utilisateur a sélectionné un fichier
+    If cheminFichier = "Faux" Then Exit Sub
+    
+    ' Accéder à la requête Power Query existante
+    ' Remplacez "NomDeVotreRequete" par le nom exact de la requête Power Query
+    Set req = ThisWorkbook.Queries("NomDeVotreRequete")
+    
+    ' Mettre à jour la source de la requête pour qu'elle pointe vers le nouveau fichier
+    req.Formula = Replace(req.Formula, "CheminDuFichierInitial.xlsx", cheminFichier)
+    
+    ' Rafraîchir la requête Power Query
+    With ThisWorkbook.Connections("Requête - NomDeVotreRequete").OLEDBConnection
+        .BackgroundQuery = False ' Exécuter en mode synchrone pour attendre la fin du rafraîchissement
+        .Refresh
+    End With
+
+    ' Message de confirmation
+    MsgBox "Les données ont été importées avec succès via Power Query!"
+End Sub
+
+   
