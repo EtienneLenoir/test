@@ -1,0 +1,29 @@
+Sub DebugPrintDictionnaire(dico As Object)
+    Dim numId As Variant
+    Dim dicoISIN As Object
+    Dim isin As Variant
+    Dim tableauCaracteristiques As Variant
+    Dim i As Long
+
+    ' Parcourir le premier dictionnaire (dictionnaire de NumId)
+    For Each numId In dico.Keys
+        Debug.Print "NumId: " & numId
+        
+        ' Obtenir le dictionnaire interne pour le NumId
+        Set dicoISIN = dico(numId)
+        
+        ' Parcourir le deuxième dictionnaire (dictionnaire d'ISIN)
+        For Each isin In dicoISIN.Keys
+            Debug.Print "  ISIN: " & isin
+            
+            ' Obtenir le tableau de caractéristiques
+            tableauCaracteristiques = dicoISIN(isin)
+            
+            ' Afficher les valeurs du tableau
+            Debug.Print "    Caractéristiques:"
+            For i = LBound(tableauCaracteristiques) To UBound(tableauCaracteristiques)
+                Debug.Print "      " & tableauCaracteristiques(i)
+            Next i
+        Next isin
+    Next numId
+End Sub
