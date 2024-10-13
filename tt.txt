@@ -1,3 +1,47 @@
+Function SommeValeursParLabelPourISIN(dico As Object, label As String, ISIN As String) As Variant
+    Dim dicoISIN As Object
+    Dim tableauCaracteristiques As Variant
+    Dim i As Long
+    Dim total As Double
+    Dim labelTrouve As Boolean
+    Dim indexColonne As Long
+
+    total = 0 ' Initialiser la somme totale
+
+    ' Parcourir chaque NumId dans le dictionnaire principal
+    For Each NumID In dico.Keys
+        ' Vérifier si le dictionnaire imbriqué pour le NumId a l'ISIN
+        If dico(NumID).Exists(ISIN) Then
+            ' Obtenir le dictionnaire imbriqué pour l'ISIN
+            Set dicoISIN = dico(NumID)
+
+            ' Obtenir le tableau de caractéristiques pour l'ISIN
+            tableauCaracteristiques = dicoISIN(ISIN)
+
+            ' Initialiser labelTrouve à False
+            labelTrouve = False
+            
+            ' Trouver l'index de la colonne correspondant au label
+            For i = LBound(tableauCaracteristiques, 2) To UBound(tableauCaracteristiques, 2)
+                If tableauCaracteristiques(1, i) = label Then
+                    indexColonne = i
+                    labelTrouve = True
+                    Exit For
+                End If
+            Next i
+            
+            ' Si le label a été trouvé, ajouter la valeur à la somme totale
+            If labelTrouve Then
+                total = total + tableauCaracteristiques(2, indexColonne) ' 2 pour la ligne de valeurs
+            End If
+        End If
+    Next NumID
+
+    ' Retourner la somme totale
+    SommeValeursParLabelPourISIN = total
+End Function
+
+
 Function GetValueFromDictionnaire(dico As Object, NumId As Variant, ISIN As Variant, label As String) As Variant
     Dim dicoISIN As Object
     Dim tableauCaracteristiques As Variant
