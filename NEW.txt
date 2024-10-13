@@ -1,0 +1,92 @@
+Sub ImporterDonneesViaSQLOptimiséSansTranspose()
+    Dim cheminFichier As String
+    Dim cn As Object
+    Dim rs As Object
+    Dim wsDestination As Worksheet
+    Dim sqlQuery As String
+    Dim data As Variant
+    Dim i As Long, j As Long
+    Dim nbRows As Long, nbCols As Long
+    Dim tableauFinal() As Variant
+    Dim schemaRs As Object
+    Dim feuilleNom As String
+
+    ' Définir la feuille de destination (la feuille active dans ce cas)
+    Set wsDestination = ThisWorkbook.ActiveSheet
+
+    ' Spécifier le chemin du fichier Excel externe
+    cheminFichier = Application.GetOpenFilename("Fichiers Excel (*.xlsx), *.xlsx")
+    
+    ' Vérifier si l'utilisateur a sélectionné un fichier
+    If cheminFichier = "Faux" Then Exit Sub
+
+    ' Créer une connexion à ADO (ActiveX Data Objects)
+    Set cn = CreateObject("ADODB.Connection")
+    Set rs = CreateObject("ADODB.Recordset")
+    
+    On Error GoTo CleanFail ' Gestion des erreurs pour nettoyage
+
+    ' Construire la chaîne de connexion à utiliser pour lire le fichier Excel comme une base de données
+    cn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & cheminFichier & ";Extended Properties=""Excel 12.0 Xml;HDR=Yes;IMEX=1"";"
+    
+    ' Obtenir le nom de la première feuille dynamiquement
+    Set schemaRs = cn.OpenSchema(20) ' 20 = adSchemaTables pour obtenir les noms de feuilles
+    
+    ' Parcourir les noms de feuilles et sélectionner la première
+    Do While Not schemaRs.EOF
+        If schemaRs.Fields("TABLE_TYPE").Value = "TABLE" Then
+            feuilleNom = schemaRs.Fields("TABLE_NAME").Value
+            Exit Do ' Prendre le premier nom trouvé
+        End If
+        schemaRs.MoveNext
+    Loop
+    
+    ' Nettoyer schemaRs
+    schemaRs.Close
+    Set schemaRs = Nothing
+
+    ' Définir la requête SQL pour extraire les données à partir de B4 sans connaître la dernière cellule
+    sqlQuery = "SELECT * FROM [" & feuilleNom & "B4:]" ' Lecture à partir de B4 jusqu'à la fin des données
+
+    ' Exécuter la requête SQL et récupérer les résultats dans l'objet Recordset
+    rs.Open sqlQuery, cn, 0, 1 ' 0=adOpenForwardOnly, 1=adLockReadOnly pour meilleure performance
+
+    ' Vérifier s'il y a des données
+    If Not rs.EOF Then
+        ' Copier les données dans un tableau en mémoire pour traitement plus rapide
+        data = rs.GetRows() ' Copie toutes les données dans un tableau
+        nbCols = UBound(data, 1) + 1 ' Nombre de colonnes
+        nbRows = UBound(data, 2) + 1 ' Nombre de lignes
+
+        ' Redimensionner le tableau final
+        ReDim tableauFinal(1 To nbRows, 1 To nbCols)
+
+        ' Remplir le tableau final avec les données sans transposer
+        For i = 0 To nbCols - 1
+            For j = 0 To nbRows - 1
+                tableauFinal(j + 1, i + 1) = data(i, j)
+            Next j
+        Next i
+
+        ' Transférer toutes les données en une seule opération, en commençant par B4
+        wsDestination.Range("B4").Resize(nbRows, nbCols).Value = tableauFinal
+    End If
+
+CleanExit:
+    ' Fermer et nettoyer les objets
+    If Not rs Is Nothing Then
+        If rs.State = 1 Then rs.Close
+        Set rs = Nothing
+    End If
+    If Not cn Is Nothing Then
+        If cn.State = 1 Then cn.Close
+        Set cn = Nothing
+    End If
+    MsgBox "Les données ont été importées avec succès via SQL sans transposition!"
+
+    Exit Sub
+
+CleanFail:
+    MsgBox "Une erreur est survenue: " & Err.Description
+    Resume CleanExit
+End Sub
