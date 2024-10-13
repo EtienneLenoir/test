@@ -42,6 +42,49 @@ Function SommeValeursParLabelPourISIN(dico As Object, label As String, ISIN As S
 End Function
 
 
+
+Sub ChargerDonneesFiltreesAvecFiltreAutomatique()
+
+    Dim ws As Worksheet
+    Dim DerniereLigne As Long
+    Dim DonneesFiltrees As Variant
+    Dim PlageFiltre As Range
+
+    ' Définir la feuille de calcul
+    Set ws = ThisWorkbook.Sheets("NomDeVotreFeuille")
+    
+    ' Trouver la dernière ligne avec des données dans la colonne A (ajuster selon vos besoins)
+    DerniereLigne = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    
+    ' Appliquer le filtre automatique sur la plage
+    ws.Range("A1:A" & DerniereLigne).AutoFilter Field:=1, Criteria1:=">10" ' Changez le critère selon vos besoins
+
+    ' Définir la plage filtrée
+    On Error Resume Next ' Pour éviter l'erreur si aucune cellule visible
+    Set PlageFiltre = ws.Range("A1:A" & DerniereLigne).SpecialCells(xlCellTypeVisible)
+    On Error GoTo 0 ' Réinitialiser le gestionnaire d'erreurs
+
+    ' Vérifier si des cellules visibles existent après le filtre
+    If Not PlageFiltre Is Nothing Then
+        ' Remplir le tableau avec les valeurs visibles
+        DonneesFiltrees = Application.Transpose(PlageFiltre.Value)
+    Else
+        MsgBox "Aucune donnée ne correspond aux critères de filtrage."
+        Exit Sub
+    End If
+
+    ' Désactiver le filtre
+    ws.AutoFilterMode = False
+
+    ' Afficher les données filtrées (pour vérification)
+    Dim i As Long
+    For i = LBound(DonneesFiltrees) To UBound(DonneesFiltrees)
+        Debug.Print DonneesFiltrees(i) ' Afficher dans la fenêtre d'exécution
+    Next i
+
+End Sub
+
+
 Function GetValueFromDictionnaire(dico As Object, NumId As Variant, ISIN As Variant, label As String) As Variant
     Dim dicoISIN As Object
     Dim tableauCaracteristiques As Variant
