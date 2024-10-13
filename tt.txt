@@ -1,29 +1,43 @@
-Sub DebugPrintDictionnaire(dico As Object)
-    Dim numId As Variant
+Function GetValueFromDictionnaire(dico As Object, NumId As Variant, ISIN As Variant, label As String) As Variant
     Dim dicoISIN As Object
-    Dim isin As Variant
     Dim tableauCaracteristiques As Variant
     Dim i As Long
+    Dim labelTrouve As Boolean
+    Dim indexColonne As Long
+    
+    ' Vérifier si NumId existe dans le dictionnaire
+    If Not dico.Exists(NumId) Then
+        GetValueFromDictionnaire = "NumId non trouvé"
+        Exit Function
+    End If
 
-    ' Parcourir le premier dictionnaire (dictionnaire de NumId)
-    For Each numId In dico.Keys
-        Debug.Print "NumId: " & numId
-        
-        ' Obtenir le dictionnaire interne pour le NumId
-        Set dicoISIN = dico(numId)
-        
-        ' Parcourir le deuxième dictionnaire (dictionnaire d'ISIN)
-        For Each isin In dicoISIN.Keys
-            Debug.Print "  ISIN: " & isin
-            
-            ' Obtenir le tableau de caractéristiques
-            tableauCaracteristiques = dicoISIN(isin)
-            
-            ' Afficher les valeurs du tableau
-            Debug.Print "    Caractéristiques:"
-            For i = LBound(tableauCaracteristiques) To UBound(tableauCaracteristiques)
-                Debug.Print "      " & tableauCaracteristiques(i)
-            Next i
-        Next isin
-    Next numId
-End Sub
+    ' Obtenir le dictionnaire pour ce NumId
+    Set dicoISIN = dico(NumId)
+    
+    ' Vérifier si ISIN existe dans le dictionnaire
+    If Not dicoISIN.Exists(ISIN) Then
+        GetValueFromDictionnaire = "ISIN non trouvé"
+        Exit Function
+    End If
+
+    ' Obtenir le tableau de caractéristiques
+    tableauCaracteristiques = dicoISIN(ISIN)
+    
+    ' Trouver l'index de la colonne correspondant au label
+    labelTrouve = False
+    For i = LBound(tableauCaracteristiques, 2) To UBound(tableauCaracteristiques, 2)
+        If tableauCaracteristiques(1, i) = label Then
+            indexColonne = i
+            labelTrouve = True
+            Exit For
+        End If
+    Next i
+    
+    ' Retourner la valeur si le label a été trouvé
+    If labelTrouve Then
+        GetValueFromDictionnaire = tableauCaracteristiques(2, indexColonne) ' 2 pour la ligne de valeurs
+    Else
+        GetValueFromDictionnaire = "Label non trouvé"
+    End If
+End Function
+
