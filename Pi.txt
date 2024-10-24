@@ -1,0 +1,711 @@
+
+Sub optimisePivot()
+
+PivotTable.ManualUpdate = True
+Application.Calculation = xlCalculationManual
+
+
+For i = 1 To oPivotField.PivotItems.count
+    If (oPivotField.PivotItems(i).name = "TestCondition") Then
+        oPivotField.Parent.ManualUpdate = True
+        oPivotField.PivotItems(i).Visible = True  'doesn't recalculate pivot table because ManualUpdate is set to True
+    Else
+        oPivotField.Parent.ManualUpdate = True
+        oPivotField.PivotItems(i).Visible = False 'doesn't recalculate pivot table because ManualUpdate is set to True
+    End If
+Next
+
+'setting pivot table ManualUpdate property to False might be redundant at this point because it gets reset to false immediately after you set Visible property of oPivotField
+oPivotField.Parent.ManualUpdate = False
+'oPivotField.Parent.Update()
+
+
+Application.Calculation = xlCalculationAutomatic
+ActiveSheet.PivotTables("PivotTable1").PivotCache.Refresh
+
+End Sub
+
+
+Sub test()
+
+     Dim PSheet As Worksheet
+     Dim DSheet As Worksheet
+     Dim LastRow As Long
+     Dim LastCol As Long
+     Dim PRange As Range
+     Dim PCache As PivotCache
+     Dim PTable As PivotTable
+
+     Sheets.Add
+     ActiveSheet.name = "Pivottable"
+
+    Set PSheet = Worksheets("Pivottable")
+    Set DSheet = Worksheets("Sheet1")
+
+    LastRow = DSheet.Cells(Rows.count, 1).End(xlUp).row
+    LastCol = DSheet.Cells(1, Columns.count).End(xlToLeft).Column
+    Set PRange = DSheet.Range("A1").CurrentRegion
+
+    Set PCache = ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=PRange)
+
+    Set PTable = PCache.CreatePivotTable(TableDestination:=PSheet.Cells(1, 1), TableName:="PRIMEPivotTable")
+
+    With PTable.PivotFields("Region")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+
+    With PTable.PivotFields("Channel")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+
+    With PTable.PivotFields("AW code")
+        .Orientation = xlRowField
+        .Position = 3
+    End With
+
+    PTable.AddDataField PSheet.PivotTables _
+        ("PRIMEPivotTable").PivotFields("Bk"), "Sum of Bk", xlSum
+    PTable.AddDataField PSheet.PivotTables _
+        ("PRIMEPivotTable").PivotFields("DY"), "Sum of DY", xlSum
+    PTable.AddDataField PSheet.PivotTables _
+        ("PRIMEPivotTable").PivotFields("TOTal"), "Sum of TOTal", xlSum
+
+End Sub
+
+
+Sub Sub_UpdateLocalPivotSources()
+  Dim stSource As String
+  Dim PC As Excel.PivotCache
+  Dim ws As Excel.Worksheet
+  Dim PT As Excel.PivotTable
+  Dim stNewSource As String
+  
+  wsMain.Activate
+  'Application.ScreenUpdating = False
+  
+  wsSource.Activate
+  stNewSource = wsSource.name & "!" & Replace(wsSource.Range(wsSource.Cells(1, 1), wsSource.Cells(wsSource.Range("A1000000").End(xlUp).row, wsSource.Range("XY1").End(xlToLeft).Column)).Address(True, True, xlR1C1), "$", "")
+  
+  For Each ws In ActiveWorkbook.Worksheets
+    ws.Activate
+    For Each PT In ws.PivotTables
+    
+    PT.ChangePivotCache _
+          ThisWorkbook.PivotCaches.Create( _
+          SourceType:=xlDatabase, _
+          SourceData:=stNewSource)
+    PT.RefreshTable
+    Next PT
+  Next ws
+  'Application.ScreenUpdating = True
+  wsMain.Activate
+  MsgBox "Pivot table update done"
+
+End Sub
+
+
+Public Function fct_tcd()
+
+    Dim rng_input       As Variant
+    Dim tcd             As PivotTable
+    Dim tcd_cache       As PivotCache
+    Dim pivot_filed     As PivotField
+    Dim rng_output      As String
+    Dim filter_value    As String
+
+    'suppression du précédent TCD
+    For Each tcd In ws_tcd.PivotTables
+        tcd.TableRange2.Clear
+    Next tcd
+
+    'Définir la plage de données
+    Set rng_input = ws_source.Range("A1").CurrentRegion
+    
+    'plage où insérer le tcd
+    rng_output = ws_tcd.Range("A1").Address(ReferenceStyle:=xlR1C1, External:=True)
+
+    'Définir Pivot Cache
+    Set tcd_cache = ActiveWorkbook.PivotCaches.Create( _
+    SourceType:=xlDatabase, SourceData:=rng_input)
+
+    ' Créer le tcd à partir du cache
+    Set tcd = tcd_cache.CreatePivotTable( _
+    TableDestination:=rng_output, TableName:="tcd_uda")
+    
+    Set rng_input = Nothing
+    
+    'Ajout des champs au TCD
+    With tcd
+        'Ajout d'une Ligne
+        With .PivotFields("Cd Ligne Produit || 342 - AP")
+            .Orientation = xlRowField
+            .Position = 1
+        End With
+        
+        With .PivotFields("Dev solde || 45 - DS")
+            .Orientation = xlRowField
+            .Position = 2
+        End With
+        
+        With .PivotFields("CPP || 27 - DS")
+            .Orientation = xlRowField
+            .Position = 3
+        End With
+        
+        
+        'Ajout d'une Colonne
+        With .PivotFields("Cd partition || 365 - DS")
+            .Orientation = xlColumnField
+            .Position = 1
+        End With
+        
+        'Ajout d 'une Valeur
+        With .PivotFields("Mt signé dev solde || 49 - DS")
+            .Orientation = xlDataField
+            .Function = xlSum
+            .Caption = "Somme de Mt signé dev solde || 49 - DS"
+        End With
+        
+        With .PivotFields("Mt signé dev liasse NF || 51 - AS")
+            .Orientation = xlDataField
+            .Function = xlSum
+            .Caption = "Somme de Mt signé dev liasse NF || 51 - AS"
+            .Position = 2
+        End With
+        
+        
+        'Mise en Forme
+        .PivotFields("Date arrêté || 7 - PATT").Orientation = xlPageField
+        .PivotFields("E/P").Orientation = xlPageField
+        .RowAxisLayout xlTabularRow
+        .RepeatAllLabels xlRepeatLabels
+        
+        .PivotFields("Date arrêté || 7 - PATT"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("Cd Ligne Métier || 906 - AP"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("Cd Ligne Produit || 342 - AP"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("CPP || 27 - DS").Subtotals = _
+            Array(False, False, False, False, False, False, False, False, False, False, False, False)
+        .PivotFields("E/P").Subtotals = Array(False, _
+            False, False, False, False, False, False, False, False, False, False, False)
+        .PivotFields("PCCO suffixé || 1007 - DS"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("Cd partition || 365 - DS"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("Dev solde || 45 - DS"). _
+            Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields("Mt signé dev solde || 49 - DS") _
+            .Subtotals = Array(False, False, False, False, False, False, False, False, False, False, _
+            False, False)
+        .PivotFields( _
+        "Mt signé dev liasse NF || 51 - AS").Subtotals = Array(False, False, False, False, _
+        False, False, False, False, False, False, False, False)
+        
+        'For Each pivot_filed In .PivotFields
+            'If pivot_filed.Subtotals(1) Then pivot_filed.Subtotals(1) = False
+        'Next pivot_filed
+        
+        '.PivotFields("Dev solde || 45 - DS").PivotItems("(blank)").Visible = False
+        '.PivotFields("CPP || 27 - DS").PivotItems("(blank)").Visible = False
+        
+    End With
+    
+    Set tcd = Nothing
+        
+End Function
+
+Public Function fct_tcd_copy()
+
+    Dim first_raw As Integer
+    Dim first_column As Integer
+    Dim last_row As Variant
+    Dim last_column As Integer
+
+    'on nettoie les données précédentes
+    ws_tcd_copy.UsedRange.Delete
+    
+    'on récupere le positionnement du tcd sur la feuille
+    With ws_tcd.PivotTables("tcd_uda").TableRange1
+        first_raw = .row
+        first_column = .Column
+        last_row = .Rows.count + .row - 1
+        last_column = .Columns.count + .Column - 1
+    End With
+    
+    ws_tcd.Range(ws_tcd.Cells(1, first_column), ws_tcd.Cells(last_row, last_column)).Copy
+    ws_tcd_copy.Range("A1").PasteSpecial Paste:=xlPasteValues
+    Application.CutCopyMode = False
+    ws_tcd_copy.Rows("1:" & first_raw & "").EntireRow.Delete
+    
+    last_row = ws_tcd_copy.Cells(Rows.count, "A").End(xlUp).row
+    ws_tcd_copy.Rows(last_row).Delete
+
+End Function
+
+Public Function FctGetArrFromPivot(ShtNamePivot As String, ShtNameBuffer As String, PivotName As String)
+
+    'Pour @FctDefineArrayControle
+
+    Dim clsError        As cls_error_handler
+    Dim WsTemp          As Worksheet
+    Dim WsBuffer        As Worksheet
+    Dim LastRow         As Long
+    Dim FirstRaw        As Integer
+    Dim FirstColumn     As Integer
+    Dim LastColumn      As Integer
+    
+    Set clsError = New cls_error_handler: clsError.SetLoc "Mod_Step5NewTreatment", "FctGetArrFromPivot"
+    
+    Set WsTemp = Workbooks(CStr(ThisWorkbook.name)).Worksheets(ShtNamePivot)
+    Set WsBuffer = Workbooks(CStr(ThisWorkbook.name)).Worksheets(ShtNameBuffer)
+    
+    'clear sht buffer for cop/paste
+    WsBuffer.Cells.ClearContents
+    'find position Pivot
+    With WsTemp.PivotTables(PivotName).TableRange1
+        FirstRaw = .row
+        FirstColumn = .Column
+        LastRow = .Rows.count + .row - 1
+        LastColumn = .Columns.count + .Column - 1
+    End With
+    
+    WsTemp.Range(WsTemp.Cells(1, FirstColumn), WsTemp.Cells(LastRow, LastColumn)).Copy
+    WsBuffer.Range("A1").PasteSpecial Paste:=xlPasteValues
+    Application.CutCopyMode = False
+
+End Function
+
+Function FctGetArrEcart(WsName) As Variant
+
+    'Pour @FctDefineArrayControle
+    
+    Dim clsError        As cls_error_handler
+    Dim WsTemp          As Worksheet
+    Dim LastRow         As Long
+    Dim LastCol         As Integer
+    Dim ArrTemp()       As Variant
+    
+    Set clsError = New cls_error_handler: clsError.SetLoc "Mod_Step5NewTreatment", "FctGetArrEcart"
+    
+    Set WsTemp = Workbooks(CStr(ThisWorkbook.name)).Worksheets(WsName)
+    
+    With WsTemp
+        LastCol = .Cells(.Range("A1").row, .Columns.count).End(xlToLeft).Column
+        LastRow = .Range(FctGetColLetterFromInt(LastCol) & "1").End(xlDown).row
+        ArrTemp = .Range(FctGetColLetterFromInt(LastCol - 1) & "1" & ":" & FctGetColLetterFromInt(LastCol) & CStr(LastRow)).value
+    End With
+    FctGetArrEcart = ArrTemp
+
+End Function
+
+
+Function FctDefineArrayControle() As Variant
+
+    Dim NameLastPivot   As String
+    
+    NameLastPivot = FctGetNameLastPivot(sht_TcdControle.name)
+    Call FctGetArrFromPivot(sht_TcdControle.name, sht_buffer.name, NameLastPivot)
+    Call FctDisplayArr(sht_buffer, FctGetArrEcart(sht_TcdControle.name), True)
+    
+    FctDefineArrayControle = FctIfArrIsNotEmpty(sht_buffer.Range("A1").CurrentRegion, "array TCD Controle (sht_buffer)")
+    
+End Function
+
+
+Sub PivotTable()
+
+Dim PTable As PivotTable
+Dim PCache As PivotCache
+Dim PRange As Range
+Dim PSheet As Worksheet
+Dim DSheet As Worksheet
+Dim LR As Long
+Dim LC As Long
+
+On Error Resume Next
+Application.DisplayAlerts = False
+Application.ScreenUpdating = False
+Worksheets("Pivot Sheet").Delete 'This will delete the exisiting pivot table worksheet
+Worksheets.Add After:=ActiveSheet ' This will add new worksheet
+ActiveSheet.name = "Pivot Sheet" ' This will rename the worksheet as "Pivot Sheet"
+On Error GoTo 0
+
+Set PSheet = Worksheets("Pivot Sheet")
+Set DSheet = Worksheets("Data Sheet")
+
+'Find Last used row and column in data sheet
+LR = DSheet.Cells(Rows.count, 1).End(xlUp).row
+LC = DSheet.Cells(1, Columns.count).End(xlToLeft).Column
+
+'Set the pivot table data range
+Set PRange = DSheet.Cells(1, 1).Resize(LR, LC)
+
+'Set pivot cahe
+Set PCache = ActiveWorkbook.PivotCaches.Create(xlDatabase, SourceData:=PRange)
+
+'Create blank pivot table
+Set PTable = PCache.CreatePivotTable(TableDestination:=PSheet.Cells(1, 1), TableName:="Sales_Report")
+
+'Insert country to Row Filed
+With PSheet.PivotTables("Sales_Report").PivotFields("Country")
+.Orientation = xlRowField
+.Position = 1
+End With
+
+'Insert Product to Row Filed & position 2
+With PSheet.PivotTables("Sales_Report").PivotFields("Product")
+.Orientation = xlRowField
+.Position = 2
+End With
+
+'Insert Segment to Column Filed & position 1
+With PSheet.PivotTables("Sales_Report").PivotFields("Segment")
+.Orientation = xlColumnField
+.Position = 1
+End With
+
+'Insert Sales column to the data field
+With PSheet.PivotTables("Sales_Report").PivotFields("Sales")
+.Orientation = xlDataField
+.Position = 1
+End With
+
+'Format Pivot Table
+PSheet.PivotTables("Sales_Report").ShowTableStyleRowStripes = True
+PSheet.PivotTables("Sales_Report").TableStyle2 = "PivotStyleMedium14"
+
+'Show in Tabular form
+PSheet.PivotTables("Sales_Report").RowAxisLayout xlTabularRow
+
+Application.DisplayAlerts = True
+Application.ScreenUpdating = True
+
+End Sub
+
+
+Sub InsertPivotTable()
+'Macro By ExcelChamps.com
+'Declare Variables
+Dim PSheet As Worksheet
+Dim DSheet As Worksheet
+Dim PCache As PivotCache
+Dim PTable As PivotTable
+Dim PRange As Range
+Dim LastRow As Long
+Dim LastCol As Long
+'Insert a New Blank Worksheet
+On Error Resume Next
+Application.DisplayAlerts = False
+Worksheets("PivotTable").Delete
+Sheets.Add Before:=ActiveSheet
+ActiveSheet.name = "PivotTable"
+Application.DisplayAlerts = True
+Set PSheet = Worksheets("PivotTable")
+Set DSheet = Worksheets("Data")
+'Define Data Range
+LastRow = DSheet.Cells(Rows.count, 1).End(xlUp).row
+LastCol = DSheet.Cells(1, Columns.count).End(xlToLeft).Column
+Set PRange = DSheet.Cells(1, 1).Resize(LastRow, LastCol)
+'Define Pivot Cache
+Set PCache = ActiveWorkbook.PivotCaches.Create _
+(SourceType:=xlDatabase, SourceData:=PRange). _
+CreatePivotTable(TableDestination:=PSheet.Cells(2, 2), _
+TableName:="SalesPivotTable")
+'Insert Blank Pivot Table
+Set PTable = PCache.CreatePivotTable _
+(TableDestination:=PSheet.Cells(1, 1), TableName:="SalesPivotTable")
+'Insert Row Fields
+With ActiveSheet.PivotTables("SalesPivotTable").PivotFields("Year")
+.Orientation = xlRowField
+.Position = 1
+End With
+With ActiveSheet.PivotTables("SalesPivotTable").PivotFields("Month")
+.Orientation = xlRowField
+.Position = 2
+End With
+'Insert Column Fields
+With ActiveSheet.PivotTables("SalesPivotTable").PivotFields("Zone")
+.Orientation = xlColumnField
+.Position = 1
+End With
+'Insert Data Field
+With ActiveSheet.PivotTables("SalesPivotTable").PivotFields("Amount")
+.Orientation = xlDataField
+.Function = xlSum
+.NumberFormat = "#,##0"
+.name = "Revenue "
+End With
+'Format Pivot Table
+ActiveSheet.PivotTables("SalesPivotTable").ShowTableStyleRowStripes = True
+ActiveSheet.PivotTables("SalesPivotTable").TableStyle2 = "PivotStyleMedium9"
+End Sub
+
+
+
+Sub CreatePivotTable()
+'PURPOSE: Creates a brand new Pivot table on a new worksheet from data in the ActiveSheet
+'Source: www.TheSpreadsheetGuru.com
+
+Dim sht As Worksheet
+Dim pvtCache As PivotCache
+Dim pvt As PivotTable
+Dim StartPvt As String
+Dim SrcData As String
+
+'Determine the data range you want to pivot
+  SrcData = ActiveSheet.name & "!" & Range("A1:R100").Address(ReferenceStyle:=xlR1C1)
+
+'Create a new worksheet
+  Set sht = Sheets.Add
+
+'Where do you want Pivot Table to start?
+  StartPvt = sht.name & "!" & sht.Range("A3").Address(ReferenceStyle:=xlR1C1)
+
+'Create Pivot Cache from Source Data
+  Set pvtCache = ActiveWorkbook.PivotCaches.Create( _
+    SourceType:=xlDatabase, _
+    SourceData:=SrcData)
+
+'Create Pivot table from Pivot Cache
+  Set pvt = pvtCache.CreatePivotTable( _
+    TableDestination:=StartPvt, _
+    TableName:="PivotTable1")
+
+End Sub
+
+
+Sub DeletePivotTable()
+'PURPOSE: How to delete a specifc Pivot Table
+'SOURCE: www.TheSpreadsheetGuru.com
+
+'Delete Pivot Table By Name
+  ActiveSheet.PivotTables("PivotTable1").TableRange2.Clear
+
+End Sub
+
+
+Sub DeleteAllPivotTables()
+'PURPOSE: Delete all Pivot Tables in your Workbook
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim sht As Worksheet
+Dim pvt As PivotTable
+
+'Loop Through Each Pivot Table In Currently Viewed Workbook
+  For Each sht In ActiveWorkbook.Worksheets
+    For Each pvt In sht.PivotTables
+      pvt.TableRange2.Clear
+    Next pvt
+  Next sht
+  
+End Sub
+
+
+Sub Adding_PivotFields()
+'PURPOSE: Show how to add various Pivot Fields to Pivot Table
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pvt As PivotTable
+
+Set pvt = ActiveSheet.PivotTables("PivotTable1")
+    
+  'Add item to the Report Filter
+    pvt.PivotFields("Year").Orientation = xlPageField
+  
+  'Add item to the Column Labels
+    pvt.PivotFields("Month").Orientation = xlColumnField
+    
+  'Add item to the Row Labels
+    pvt.PivotFields("Account").Orientation = xlRowField
+    
+  'Position Item in list
+    pvt.PivotFields("Year").Position = 1
+    
+  'Format Pivot Field
+    pvt.PivotFields("Year").NumberFormat = "#,##0"
+    
+  'Turn on Automatic updates/calculations --like screenupdating to speed up code
+    pvt.ManualUpdate = False
+    
+End Sub
+
+
+Sub AddCalculatedField()
+'PURPOSE: Add a calculated field to a pivot table
+'SOURCE: www.TheSpreadsheetGuru.com
+   
+Dim pvt As PivotTable
+Dim pf As PivotField
+
+'Set Variable to Desired Pivot Table
+  Set pvt = ActiveSheet.PivotTables("PivotTable1")
+
+'Set Variable Equal to Desired Calculated Pivot Field
+  For Each pf In pvt.PivotFields
+    If pf.SourceName = "Inflation" Then Exit For
+  Next
+
+'Add Calculated Field to Pivot Table
+  pvt.AddDataField pf
+
+End Sub
+
+Sub AddValuesField()
+'PURPOSE: Add A Values Field to a Pivot Table
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pvt As PivotTable
+Dim pf As String
+Dim pf_Name As String
+
+pf = "Salaries"
+pf_Name = "Sum of Salaries"
+
+Set pvt = ActiveSheet.PivotTables("PivotTable1")
+
+pvt.AddDataField pvt.PivotFields("Salaries"), pf_Name, xlSum
+
+End Sub
+
+
+Sub RemovePivotField()
+'PURPOSE: Remove a field from a Pivot Table
+'SOURCE: www.TheSpreadsheetGuru.com
+
+'Removing Filter, Columns, Rows
+  ActiveSheet.PivotTables("PivotTable1").PivotFields("Year").Orientation = xlHidden
+    
+'Removing Values
+  ActiveSheet.PivotTables("PivotTable1").PivotFields("Sum of Salaries").Orientation = xlHidden
+  
+End Sub
+
+
+Sub RemoveCalculatedField()
+'PURPOSE: Remove a calculated field from a pivot table
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pvt As PivotTable
+Dim pf As PivotField
+Dim pi As PivotItem
+
+'Set Variable to Desired Pivot Table
+  Set pvt = ActiveSheet.PivotTables("PivotTable1")
+
+'Set Variable Equal to Desired Calculated Data Field
+  For Each pf In pvt.DataFields
+    If pf.SourceName = "Inflation" Then Exit For
+  Next
+
+'Hide/Remove the Calculated Field
+  pf.DataRange.Cells(1, 1).PivotItem.Visible = False
+
+End Sub
+
+
+
+Sub ReportFiltering_Single()
+'PURPOSE: Filter on a single item with the Report Filter field
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pf As PivotField
+
+Set pf = ActiveSheet.PivotTables("PivotTable2").PivotFields("Fiscal_Year")
+
+'Clear Out Any Previous Filtering
+  pf.ClearAllFilters
+
+'Filter on 2014 items
+  pf.CurrentPage = "2014"
+
+End Sub
+
+
+Sub ReportFiltering_Multiple()
+'PURPOSE: Filter on multiple items with the Report Filter field
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pf As PivotField
+
+Set pf = ActiveSheet.PivotTables("PivotTable2").PivotFields("Variance_Level_1")
+
+'Clear Out Any Previous Filtering
+  pf.ClearAllFilters
+
+'Enable filtering on multiple items
+    pf.EnableMultiplePageItems = True
+    
+'Must turn off items you do not want showing
+    pf.PivotItems("Jan").Visible = False
+    pf.PivotItems("Feb").Visible = False
+    pf.PivotItems("Mar").Visible = False
+
+End Sub
+
+
+Sub ClearReportFiltering()
+'PURPOSE: How to clear the Report Filter field
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pf As PivotField
+
+Set pf = ActiveSheet.PivotTables("PivotTable2").PivotFields("Fiscal_Year")
+
+'Option 1: Clear Out Any Previous Filtering
+  pf.ClearAllFilters
+  
+'Option 2: Show All (remove filtering)
+  pf.CurrentPage = "(All)"
+
+End Sub
+
+Sub RefreshingPivotTables()
+'PURPOSE: Shows various ways to refresh Pivot Table Data
+'SOURCE: www.TheSpreadsheetGuru.com
+
+'Refresh A Single Pivot Table
+  ActiveSheet.PivotTables("PivotTable1").PivotCache.Refresh
+  
+'Refresh All Pivot Tables
+  ActiveWorkbook.RefreshAll
+    
+End Sub
+
+
+
+Sub PivotGrandTotals()
+'PURPOSE: Show setup for various Pivot Table Grand Total options
+'SOURCE: www.TheSpreadsheetGuru.com
+
+Dim pvt As PivotTable
+
+Set pvt = ActiveSheet.PivotTables("PivotTable1")
+
+'Off for Rows and Columns
+  pvt.ColumnGrand = False
+  pvt.RowGrand = False
+
+'On for Rows and Columns
+  pvt.ColumnGrand = True
+  pvt.RowGrand = True
+
+'On for Rows only
+  pvt.ColumnGrand = False
+  pvt.RowGrand = True
+  
+'On for Columns Only
+  pvt.ColumnGrand = True
+  pvt.RowGrand = False
+
+End Sub
+
