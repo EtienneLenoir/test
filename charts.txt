@@ -1,0 +1,61 @@
+https://stackoverflow.com/questions/46712110/how-to-add-a-counter-column-to-existing-matrix-in-vba/46834384#46834384
+https://peltiertech.com/Excel/ChartsHowTo/QuickChartVBA.html
+https://peltiertech.com/dynamic-array-histogram/
+https://peltiertech.com/lambda-moving-average-formulas/
+https://peltiertech.com/floating-bars-excel-charts/
+https://exceloffthegrid.com/vba-code-for-charts-and-graphs-in-excel/
+https://www.thespreadsheetguru.com/charts-vba/
+
+https://fr.wikiversity.org/wiki/Macros-commandes_VBA/Cr%C3%A9ation_de_Graphique
+
+https://vb.developpez.com/faqvba/?page=3.5
+
+onction publique IsArrayEmpty (Arr comme variante) en tant que booléen
+'''''''''''''''''''''''''''''''''''''''''''''' '''''''''''''''''''''''''''''''''''
+' Est un tableau vide
+' Cette fonction teste si le tableau est vide (non alloué). Renvoie VRAI ou FAUX.
+'
+' La fonction VBA IsArray indique si une variable est un tableau, mais elle ne
+' faire la distinction entre les tableaux alloués et non alloués. Il renverra TRUE pour les deux
+' tableaux alloués et non alloués. Cette fonction teste si le tableau a réellement
+" a été attribué.
+'
+« Cette fonction est en réalité l'inverse de IsArrayAllocated.
+'''''''''''''''''''''''''''''''''''''''''''''' ''''''''''''''''''''''''''''''''''''
+
+Dim LB aussi longtemps
+Dim UB aussi longtemps
+
+Err.Effacer
+En cas d'erreur, reprendre la suivante
+Si IsArray(Arr) = False Alors
+    " on ne nous a pas passé de tableau, renvoie True
+    IsArrayEmpty = Vrai
+Fin si
+
+" Tentez d'obtenir la limite inférieure du tableau. Si le tableau est
+" non alloué, une erreur se produira.
+UB = UBound(Arr, 1)
+Si (Err.Number <> 0) Alors
+    IsArrayEmpty = Vrai
+Autre
+    '''''''''''''''''''''''''''''''''''''''
+    « Dans de rares occasions, dans des circonstances où je
+    " ne peut pas être répliqué de manière fiable, Err.Number
+    ' sera 0 pour un tableau vide et non alloué.
+    « Dans ces occasions, LBound est 0 et
+    « UBoung est -1.
+    " Pour tenir compte du comportement étrange, testez pour
+    ' voir si LB > UB. Si c'est le cas, le tableau n'est pas
+    ' alloué.
+    '''''''''''''''''''''''''''''''''''''''
+    Err.Effacer
+    LB = LBound(Arr)
+    Si LB > UB alors
+        IsArrayEmpty = Vrai
+    Autre
+        IsArrayEmpty = Faux
+    Fin si
+Fin si
+
+Fonction de fin
