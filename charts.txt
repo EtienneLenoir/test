@@ -1,3 +1,10 @@
+https://devtut.github.io/excelvba/charts-and-charting.html#creating-an-empty-chart
+https://peltiertech.com/Excel/ChartsHowTo/ResizeAndMoveAChart.html
+https://www.educba.com/vba-charts/
+https://wellsr.com/vba/2018/excel/automatically-create-excel-charts-with-vba/
+
+
+
 https://stackoverflow.com/questions/46712110/how-to-add-a-counter-column-to-existing-matrix-in-vba/46834384#46834384
 https://peltiertech.com/Excel/ChartsHowTo/QuickChartVBA.html
 https://peltiertech.com/dynamic-array-histogram/
