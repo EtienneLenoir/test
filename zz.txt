@@ -1,0 +1,451 @@
+Dim objWorksheet As Worksheet 
+Dim objChart As Chart 
+
+Set objWorksheet = Sheets(Sheets.Count) 
+Set objChart = Charts.Add 
+objChart.Move After:=objWorksheet 
+
+'Moving and Resizing charts'
+ActiveChart.Location Where:=xlLocationAsObject, Name:="Sheet2" 
+ActiveSheet.Shapes("Chart 2").IncrementLeft -10.5 
+ActiveSheet.Shapes("Chart 2").IncrementTop -5# 
+Call MsgBox(ActiveChart.Parent) 
+
+
+objChart.SeriesCollection(1).Trendlines.Add(Type:=xlTrendlineType.xlLinear, _ 
+                     Forward:=0, _ 
+                     Backward:=0, _ 
+                     DisplayEquation:=False, _ 
+                     DisplayRSquared:=False) 
+					 
+#
+
+objChart.SetElement(msoElementLineHiLowLine) 
+
+Dim objhilowlines As Excel.HiLoLines 
+Set objhilowlines = objChart.ChartGroups(1).HiLoLines 
+objhilowlines.Format.Line.ForeColor.RGB = RGB(10,20,30) 
+objhilowlines.Border.Color = RGB(10,20,30) 
+
+If (objChart.ChartGroups(1).HasHighLowLines = True) Then 
+End If 
+
+
+# TOP 1
+
+Sub GenerateTestDataAndSmoothLineAndAreaChart()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets.Add
+    ws.Name = "Prix et Volume"
+    
+    ' En-têtes de colonnes
+    ws.Range("A1").Value = "Date"
+    ws.Range("B1").Value = "Prix"
+    ws.Range("C1").Value = "Volume"
+    
+    ' Définition de la plage de dates
+    Dim startDate As Date
+    Dim endDate As Date
+    startDate = DateSerial(2024, 1, 4)
+    endDate = DateSerial(2024, 11, 8)
+    
+    ' Variables pour créer des données plus réalistes
+    Dim currentDate As Date
+    currentDate = endDate
+    Dim rowIndex As Integer
+    rowIndex = 2
+
+    ' Variables pour la marche aléatoire
+    Dim price As Double
+    Dim volume As Long
+    price = 150 ' Prix de départ réaliste
+    volume = 5000 ' Volume de départ réaliste
+    
+    ' Remplir les données de test (du plus récent au plus ancien)
+    Do While currentDate >= startDate
+        ' Date
+        ws.Cells(rowIndex, 1).Value = currentDate
+        
+        ' Prix : applique une variation aléatoire pour chaque jour
+        price = price * (1 + WorksheetFunction.RandBetween(-10, 10) / 1000) ' Variation de -1% à +1%
+        ws.Cells(rowIndex, 2).Value = Round(price, 2)
+        
+        ' Volume : fluctue autour de 5000 avec des variations aléatoires
+        volume = WorksheetFunction.RandBetween(4500, 5500)
+        ws.Cells(rowIndex, 3).Value = volume
+        
+        ' Passer au jour précédent
+        currentDate = currentDate - 1
+        rowIndex = rowIndex + 1
+    Loop
+
+    ' Création du graphique
+    Dim chartObj As ChartObject
+    Set chartObj = ws.ChartObjects.Add(Left:=50, Width:=600, Top:=50, Height:=400)
+    chartObj.Chart.ChartType = xlLine ' Type de graphique de base
+
+    ' Ajouter les séries de données pour les prix et le volume
+    With chartObj.Chart
+        .SetSourceData Source:=ws.Range("A1:C" & rowIndex - 1)
+        
+        ' Supprimer les séries par défaut et ajouter les séries spécifiques
+        Do While .SeriesCollection.Count > 0
+            .SeriesCollection(1).Delete
+        Loop
+        
+        ' Série de prix (ligne lisse)
+        Dim priceSeries As Series
+        Set priceSeries = .SeriesCollection.NewSeries
+        priceSeries.Name = "Prix"
+        priceSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        priceSeries.Values = ws.Range("B2:B" & rowIndex - 1)
+        priceSeries.ChartType = xlLine ' Ligne pour le prix
+        priceSeries.Smooth = True ' Rendre la ligne lisse
+        priceSeries.AxisGroup = xlPrimary
+
+        ' Série de volume (surface pleine)
+        Dim volumeSeries As Series
+        Set volumeSeries = .SeriesCollection.NewSeries
+        volumeSeries.Name = "Volume"
+        volumeSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        volumeSeries.Values = ws.Range("C2:C" & rowIndex - 1)
+        volumeSeries.ChartType = xlArea ' Surface pleine pour le volume
+        volumeSeries.AxisGroup = xlSecondary ' Axe secondaire pour le volume
+
+        ' Ajuster les axes
+        .HasAxis(xlCategory, xlPrimary) = True
+        .HasAxis(xlValue, xlPrimary) = True
+        .HasAxis(xlValue, xlSecondary) = True
+
+        ' Ajouter des titres
+        .HasTitle = True
+        .ChartTitle.Text = "Évolution du Prix et du Volume"
+        .Axes(xlCategory).HasTitle = True
+        .Axes(xlCategory).AxisTitle.Text = "Date"
+        .Axes(xlValue, xlPrimary).HasTitle = True
+        .Axes(xlValue, xlPrimary).AxisTitle.Text = "Prix"
+        .Axes(xlValue, xlSecondary).HasTitle = True
+        .Axes(xlValue, xlSecondary).AxisTitle.Text = "Volume"
+    End With
+End Sub
+
+# top 2	
+
+Sub GenerateTestDataWithVolatilityChartAndVolumeInThousands()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets.Add
+    ws.Name = "Prix, Volume et Volatilité"
+    
+    ' En-têtes de colonnes
+    ws.Range("A1").Value = "Date"
+    ws.Range("B1").Value = "Prix"
+    ws.Range("C1").Value = "Volume"
+    ws.Range("D1").Value = "Volatilité (Moyenne Mobile 10j)"
+    
+    ' Définition de la plage de dates
+    Dim startDate As Date
+    Dim endDate As Date
+    startDate = DateSerial(2024, 1, 4)
+    endDate = DateSerial(2024, 11, 8)
+    
+    ' Variables pour créer des données de prix et de volume
+    Dim currentDate As Date
+    currentDate = endDate
+    Dim rowIndex As Integer
+    rowIndex = 2
+
+    ' Variables pour la marche aléatoire et calcul de volatilité
+    Dim price As Double
+    Dim volume As Long
+    Dim dailyVolatility As Double
+    price = 150 ' Prix de départ réaliste
+    volume = 5000 ' Volume de départ réaliste
+    
+    ' Remplir les données de test (du plus récent au plus ancien)
+    Do While currentDate >= startDate
+        ' Date
+        ws.Cells(rowIndex, 1).Value = currentDate
+        
+        ' Prix : applique une variation aléatoire pour chaque jour
+        Dim previousPrice As Double
+        If rowIndex > 2 Then
+            previousPrice = ws.Cells(rowIndex - 1, 2).Value
+        Else
+            previousPrice = price
+        End If
+        
+        ' Calculer le nouveau prix avec une petite variation
+        price = previousPrice * (1 + WorksheetFunction.RandBetween(-10, 10) / 1000) ' Variation de -1% à +1%
+        ws.Cells(rowIndex, 2).Value = Round(price, 2)
+        
+        ' Volume : fluctue autour de 5000 avec des variations aléatoires
+        volume = WorksheetFunction.RandBetween(4500, 5500)
+        ws.Cells(rowIndex, 3).Value = volume
+        
+        ' Calculer la volatilité comme la moyenne mobile de la variation sur 10 jours
+        If rowIndex >= 12 Then ' Attendre les 10 premiers jours pour une moyenne mobile
+            dailyVolatility = WorksheetFunction.Average(ws.Range("B" & rowIndex - 9 & ":B" & rowIndex))
+            ws.Cells(rowIndex, 4).Value = Abs(price - dailyVolatility) ' Écart par rapport à la moyenne
+        End If
+        
+        ' Passer au jour précédent
+        currentDate = currentDate - 1
+        rowIndex = rowIndex + 1
+    Loop
+
+    ' Création du graphique
+    Dim chartObj As ChartObject
+    Set chartObj = ws.ChartObjects.Add(Left:=50, Width:=700, Top:=50, Height:=400)
+    chartObj.Chart.ChartType = xlLine ' Type de graphique de base
+
+    ' Ajouter les séries de données pour les prix, volume et volatilité
+    With chartObj.Chart
+        .SetSourceData Source:=ws.Range("A1:D" & rowIndex - 1)
+        
+        ' Supprimer les séries par défaut et ajouter les séries spécifiques
+        Do While .SeriesCollection.Count > 0
+            .SeriesCollection(1).Delete
+        Loop
+        
+        ' Série de prix (ligne lisse)
+        Dim priceSeries As Series
+        Set priceSeries = .SeriesCollection.NewSeries
+        priceSeries.Name = "Prix"
+        priceSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        priceSeries.Values = ws.Range("B2:B" & rowIndex - 1)
+        priceSeries.ChartType = xlLine ' Ligne pour le prix
+        priceSeries.Smooth = True ' Rendre la ligne lisse
+        priceSeries.AxisGroup = xlPrimary
+
+        ' Série de volume (surface pleine) en milliers
+        Dim volumeSeries As Series
+        Set volumeSeries = .SeriesCollection.NewSeries
+        volumeSeries.Name = "Volume"
+        volumeSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        volumeSeries.Values = ws.Range("C2:C" & rowIndex - 1)
+        
+        ' Diviser par 1000 pour afficher le volume en milliers
+        Dim i As Integer
+        For i = 2 To rowIndex - 1
+            ws.Cells(i, 3).Value = ws.Cells(i, 3).Value / 1000
+        Next i
+        
+        volumeSeries.ChartType = xlArea ' Surface pleine pour le volume
+        volumeSeries.AxisGroup = xlSecondary ' Axe secondaire pour le volume
+
+        ' Série de volatilité (ligne)
+        Dim volatilitySeries As Series
+        Set volatilitySeries = .SeriesCollection.NewSeries
+        volatilitySeries.Name = "Volatilité (Moyenne Mobile 10j)"
+        volatilitySeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        volatilitySeries.Values = ws.Range("D2:D" & rowIndex - 1)
+        volatilitySeries.ChartType = xlLine ' Ligne pour la volatilité
+        volatilitySeries.Smooth = True ' Rendre la ligne de volatilité lisse
+        volatilitySeries.AxisGroup = xlPrimary
+
+        ' Ajuster les axes
+        .HasAxis(xlCategory, xlPrimary) = True
+        .HasAxis(xlValue, xlPrimary) = True
+        .HasAxis(xlValue, xlSecondary) = True
+
+        ' Ajouter des titres
+        .HasTitle = True
+        .ChartTitle.Text = "Évolution du Prix, Volume et Volatilité"
+        .Axes(xlCategory).HasTitle = True
+        .Axes(xlCategory).AxisTitle.Text = "Date"
+        .Axes(xlValue, xlPrimary).HasTitle = True
+        .Axes(xlValue, xlPrimary).AxisTitle.Text = "Prix et Volatilité"
+        .Axes(xlValue, xlSecondary).HasTitle = True
+        .Axes(xlValue, xlSecondary).AxisTitle.Text = "Volume (en milliers)"
+    End With
+End Sub
+
+
+# top
+
+Sub GenerateTestDataWithVolatilityChartAndVolume()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets.Add
+    ws.Name = "Prix, Volume et Volatilité"
+    
+    ' En-têtes de colonnes
+    ws.Range("A1").Value = "Date"
+    ws.Range("B1").Value = "Prix"
+    ws.Range("C1").Value = "Volume"
+    ws.Range("D1").Value = "Volatilité (Moyenne Mobile 10j)"
+    
+    ' Définition de la plage de dates
+    Dim startDate As Date
+    Dim endDate As Date
+    startDate = DateSerial(2024, 1, 4)
+    endDate = DateSerial(2024, 11, 8)
+    
+    ' Variables pour créer des données de prix et de volume
+    Dim currentDate As Date
+    currentDate = endDate
+    Dim rowIndex As Integer
+    rowIndex = 2
+
+    ' Variables pour la marche aléatoire et calcul de volatilité
+    Dim price As Double
+    Dim volume As Long
+    Dim dailyVolatility As Double
+    price = 150 ' Prix de départ réaliste
+    volume = 5000 ' Volume de départ réaliste
+    
+    ' Remplir les données de test (du plus récent au plus ancien)
+    Do While currentDate >= startDate
+        ' Date
+        ws.Cells(rowIndex, 1).Value = currentDate
+        
+        ' Prix : applique une variation aléatoire pour chaque jour
+        Dim previousPrice As Double
+        If rowIndex > 2 Then
+            previousPrice = ws.Cells(rowIndex - 1, 2).Value
+        Else
+            previousPrice = price
+        End If
+        
+        ' Calculer le nouveau prix avec une petite variation
+        price = previousPrice * (1 + WorksheetFunction.RandBetween(-10, 10) / 1000) ' Variation de -1% à +1%
+        ws.Cells(rowIndex, 2).Value = Round(price, 2)
+        
+        ' Volume : fluctue autour de 5000 avec des variations aléatoires
+        volume = WorksheetFunction.RandBetween(4500, 5500)
+        ws.Cells(rowIndex, 3).Value = volume
+        
+        ' Calculer la volatilité comme la moyenne mobile de la variation sur 10 jours
+        If rowIndex >= 12 Then ' Attendre les 10 premiers jours pour une moyenne mobile
+            dailyVolatility = WorksheetFunction.Average(ws.Range("B" & rowIndex - 9 & ":B" & rowIndex))
+            ws.Cells(rowIndex, 4).Value = Abs(price - dailyVolatility) ' Écart par rapport à la moyenne
+        End If
+        
+        ' Passer au jour précédent
+        currentDate = currentDate - 1
+        rowIndex = rowIndex + 1
+    Loop
+
+    ' Création du graphique
+    Dim chartObj As ChartObject
+    Set chartObj = ws.ChartObjects.Add(Left:=50, Width:=700, Top:=50, Height:=400)
+    chartObj.Chart.ChartType = xlLine ' Type de graphique de base
+
+    ' Ajouter les séries de données pour les prix, volume et volatilité
+    With chartObj.Chart
+        .SetSourceData Source:=ws.Range("A1:D" & rowIndex - 1)
+        
+        ' Supprimer les séries par défaut et ajouter les séries spécifiques
+        Do While .SeriesCollection.Count > 0
+            .SeriesCollection(1).Delete
+        Loop
+        
+        ' Série de prix (ligne lisse)
+        Dim priceSeries As Series
+        Set priceSeries = .SeriesCollection.NewSeries
+        priceSeries.Name = "Prix"
+        priceSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        priceSeries.Values = ws.Range("B2:B" & rowIndex - 1)
+        priceSeries.ChartType = xlLine ' Ligne pour le prix
+        priceSeries.Smooth = True ' Rendre la ligne lisse
+        priceSeries.AxisGroup = xlPrimary
+
+        ' Série de volume (surface pleine)
+        Dim volumeSeries As Series
+        Set volumeSeries = .SeriesCollection.NewSeries
+        volumeSeries.Name = "Volume"
+        volumeSeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        volumeSeries.Values = ws.Range("C2:C" & rowIndex - 1)
+        volumeSeries.ChartType = xlArea ' Surface pleine pour le volume
+        volumeSeries.AxisGroup = xlSecondary ' Axe secondaire pour le volume
+
+        ' Série de volatilité (ligne)
+        Dim volatilitySeries As Series
+        Set volatilitySeries = .SeriesCollection.NewSeries
+        volatilitySeries.Name = "Volatilité (Moyenne Mobile 10j)"
+        volatilitySeries.XValues = ws.Range("A2:A" & rowIndex - 1)
+        volatilitySeries.Values = ws.Range("D2:D" & rowIndex - 1)
+        volatilitySeries.ChartType = xlLine ' Ligne pour la volatilité
+        volatilitySeries.Smooth = True ' Rendre la ligne de volatilité lisse
+        volatilitySeries.AxisGroup = xlPrimary
+
+        ' Ajuster les axes
+        .HasAxis(xlCategory, xlPrimary) = True
+        .HasAxis(xlValue, xlPrimary) = True
+        .HasAxis(xlValue, xlSecondary) = True
+
+        ' Ajouter des titres
+        .HasTitle = True
+        .ChartTitle.Text = "Évolution du Prix, Volume et Volatilité"
+        .Axes(xlCategory).HasTitle = True
+        .Axes(xlCategory).AxisTitle.Text = "Date"
+        .Axes(xlValue, xlPrimary).HasTitle = True
+        .Axes(xlValue, xlPrimary).AxisTitle.Text = "Prix et Volatilité"
+        .Axes(xlValue, xlSecondary).HasTitle = True
+        .Axes(xlValue, xlSecondary).AxisTitle.Text = "Volume"
+
+        ' Ajustement de l'échelle de l'axe primaire (Prix et Volatilité)
+        With .Axes(xlValue, xlPrimary)
+            ' Calculer la plage des prix
+            Dim minPrice As Double
+            Dim maxPrice As Double
+            minPrice = Application.WorksheetFunction.Min(ws.Range("B2:B" & rowIndex - 1))
+            maxPrice = Application.WorksheetFunction.Max(ws.Range("B2:B" & rowIndex - 1))
+
+            ' Ajuster la plage et l'échelle
+            .MinimumScale = Round(minPrice * 0.9, 0) ' Légèrement en dessous du minimum
+            .MaximumScale = Round(maxPrice * 1.1, 0) ' Légèrement au-dessus du maximum
+
+            ' Calculer la plage de valeurs
+            Dim priceRange As Double
+            priceRange = maxPrice - minPrice
+
+            ' Déterminer un pas approprié en fonction de la plage des prix
+            Dim majorUnit As Double
+            If priceRange < 10 Then
+                majorUnit = 1 ' Pas plus petit si la plage est petite
+            ElseIf priceRange < 50 Then
+                majorUnit = 5
+            ElseIf priceRange < 100 Then
+                majorUnit = 10
+            ElseIf priceRange < 500 Then
+                majorUnit = 25
+            Else
+                majorUnit = 50
+            End If
+
+            ' Arrondir le pas à l'entier le plus proche
+            .majorUnit = Round(majorUnit, 0)
+        End With
+        
+        ' Ajustement de l'échelle de l'axe secondaire (Volume)
+        With .Axes(xlValue, xlSecondary)
+            ' Calculer les valeurs minimales et maximales pour le volume
+            Dim minVolume As Double
+            Dim maxVolume As Double
+            minVolume = Application.WorksheetFunction.Min(ws.Range("C2:C" & rowIndex - 1))
+            maxVolume = Application.WorksheetFunction.Max(ws.Range("C2:C" & rowIndex - 1))
+            
+            ' Ajuster la plage du volume avec un facteur d'extension pour mieux voir les variations
+            .MinimumScale = Round(minVolume * 0.8, 0) ' Légèrement en dessous du minimum
+            .MaximumScale = Round(maxVolume * 1.1, 0) ' Légèrement au-dessus du maximum
+            
+            ' Calculer un pas plus large pour les volumes (en fonction de la plage de volume)
+            Dim volumeRange As Double
+            volumeRange = maxVolume - minVolume
+            Dim volumeMajorUnit As Double
+            
+            If volumeRange < 5000 Then
+                volumeMajorUnit = 500
+            ElseIf volumeRange < 10000 Then
+                volumeMajorUnit = 1000
+            Else
+                volumeMajorUnit = 2000
+            End If
+
+            ' Arrondir le pas à l'entier le plus proche
+            .majorUnit = Round(volumeMajorUnit, 0)
+        End With
+    End With
+End Sub
+
+
