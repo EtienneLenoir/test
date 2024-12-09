@@ -1,0 +1,544 @@
+# AndersonDarling
+
+' Fonction de calcul de la statistique d'Anderson-Darling
+Function AndersonDarlingStatistic(data() As Double, mean As Double, stdDev As Double, n As Long) As Double
+    Dim i As Long
+    Dim z() As Double, F() As Double
+    Dim S As Double
+    
+    ReDim z(1 To n), F(1 To n)
+    S = 0
+    
+    ' Calcul des scores z et des probabilités cumulées
+    For i = 1 To n
+        z(i) = (data(i) - mean) / stdDev
+        F(i) = WorksheetFunction.NormSDist(z(i))
+        S = S - (2 * i - 1) / n * (WorksheetFunction.Ln(F(i)) + WorksheetFunction.Ln(1 - F(n - i + 1)))
+    Next i
+    
+    ' Statistique A²
+    AndersonDarlingStatistic = -n - S
+End Function
+
+' Fonction pour calculer la p-valeur à partir de A²
+Function AndersonDarlingPValue(A2 As Double, n As Long) As Double
+    Dim adjustedA2 As Double
+    Dim pValue As Double
+    
+    ' Ajustement de la statistique en fonction de la taille de l'échantillon
+    adjustedA2 = A2 * (1 + 0.75 / n + 2.25 / (n ^ 2))
+    
+    ' Approximation de la p-valeur (selon Stephens)
+    If adjustedA2 < 0.2 Then
+        pValue = 1 - Exp(-13.436 + 101.14 * adjustedA2 - 223.73 * (adjustedA2 ^ 2))
+    ElseIf adjustedA2 < 0.34 Then
+        pValue = 1 - Exp(-8.318 + 42.796 * adjustedA2 - 59.938 * (adjustedA2 ^ 2))
+    ElseIf adjustedA2 < 0.6 Then
+        pValue = Exp(0.9177 - 4.279 * adjustedA2 - 1.38 * (adjustedA2 ^ 2))
+    ElseIf adjustedA2 < 13 Then
+        pValue = Exp(1.2937 - 5.709 * adjustedA2 + 0.0186 * (adjustedA2 ^ 2))
+    Else
+        pValue = 0 ' p-valeur très faible pour A² très élevé
+    End If
+    
+    ' Retourner la p-valeur
+    AndersonDarlingPValue = WorksheetFunction.Max(WorksheetFunction.Min(pValue, 1), 0)
+End Function
+
+
+# Levy process
+
+    ' Specify Levy distribution parameters
+    Mean = 0 ' µ = 0 (ou autre valeur selon votre cas)
+    C = 1   ' Constante de Lévy
+    Scale = 1 ' Échelle (σ ou C dans certaines notations)
+    
+    ' Compute theoretical Levy quantiles
+    For i = 1 To n
+        Dim p As Double
+        p = (i - 0.5) / n ' Empirical cumulative probability
+        LevyQuantiles(i) = LevyInverseCDF(p, Mean, C, Scale)
+    Next i
+	
+Function LevyInverseCDF(p As Double, Mean As Double, C As Double, Scale As Double) As Double
+    ' Calculate the inverse CDF of the Levy distribution
+    Dim Pi As Double
+    Pi = 3.14159265358979
+    LevyInverseCDF = Mean + Scale / ((Cos(Pi * (1 - p))) ^ 2)
+End Function
+
+
+# Autre
+
+b) Tail Index
+Évalue la pente des queues sur un graphique log-log, souvent utilisé avec des lois de Pareto ou EVT.
+c) Conditional Tail Expectation (CTE)
+Mesure l’espérance conditionnelle dans les queues épaisses, au-delà d’un seuil critique.
+d) Hill Estimator
+Une méthode pour estimer le tail index dans des distributions avec queues épaisses.
+
+
+
+# Tail index
+Sub TailIndexLogLog()
+    Dim ws As Worksheet
+    Dim n As Long, i As Long
+    Dim SortedData() As Double
+    Dim LogX() As Double, LogY() As Double
+    Dim Probabilities() As Double
+    Dim TailIndex As Double
+    Dim SumX As Double, SumY As Double, SumXY As Double, SumX2 As Double
+    Dim PlotSheet As Worksheet
+
+    ' Set up worksheet references
+    Set ws = ThisWorkbook.Sheets("Data") ' La feuille où vos données se trouvent
+    Set PlotSheet = ThisWorkbook.Sheets("Tail Index Plot") ' Feuille pour les graphiques
+
+    ' Read data
+    n = Application.WorksheetFunction.Count(ws.Range("A:A"))
+    ReDim SortedData(1 To n)
+    ReDim LogX(1 To n)
+    ReDim LogY(1 To n)
+    ReDim Probabilities(1 To n)
+
+    ' Collect data and sort it in descending order
+    For i = 1 To n
+        SortedData(i) = ws.Cells(i, 1).Value
+    Next i
+    QuickSort SortedData, LBound(SortedData), UBound(SortedData), Descending:=True
+
+    ' Compute ranks and empirical probabilities
+    For i = 1 To n
+        Probabilities(i) = i / (n + 1) ' Rank / (Total + 1) pour éviter 0 ou 1
+        LogX(i) = Log(SortedData(i)) ' Logarithme des valeurs
+        LogY(i) = Log(1 - Probabilities(i)) ' Logarithme des probabilités complémentaires
+    Next i
+
+    ' Calculate Tail Index using linear regression
+    For i = 1 To n
+        SumX = SumX + LogX(i)
+        SumY = SumY + LogY(i)
+        SumXY = SumXY + LogX(i) * LogY(i)
+        SumX2 = SumX2 + LogX(i) ^ 2
+    Next i
+    TailIndex = (n * SumXY - SumX * SumY) / (n * SumX2 - SumX ^ 2)
+
+    ' Clear plot sheet and output Tail Index
+    PlotSheet.Cells.Clear
+    PlotSheet.Cells(1, 1).Value = "Log(Values)"
+    PlotSheet.Cells(1, 2).Value = "Log(1 - Probabilities)"
+    PlotSheet.Cells(1, 4).Value = "Tail Index:"
+    PlotSheet.Cells(1, 5).Value = TailIndex
+
+    ' Output Log-Log data
+    For i = 1 To n
+        PlotSheet.Cells(i + 1, 1).Value = LogX(i)
+        PlotSheet.Cells(i + 1, 2).Value = LogY(i)
+    Next i
+
+    ' Create Log-Log plot
+    Dim Chart As ChartObject
+    Set Chart = PlotSheet.ChartObjects.Add(Left:=100, Width:=400, Top:=50, Height:=300)
+    With Chart.Chart
+        .ChartType = xlXYScatterLines
+        .SetSourceData Source:=PlotSheet.Range("A1:B" & n + 1)
+        .HasTitle = True
+        .ChartTitle.Text = "Log-Log Tail Plot"
+        .Axes(xlCategory).HasTitle = True
+        .Axes(xlCategory).AxisTitle.Text = "Log(Values)"
+        .Axes(xlValue).HasTitle = True
+        .Axes(xlValue).AxisTitle.Text = "Log(1 - Probabilities)"
+    End With
+
+    MsgBox "Tail Index calculated: " & TailIndex, vbInformation, "Result"
+End Sub
+
+Sub QuickSort(arr As Variant, low As Long, high As Long, Optional Descending As Boolean = False)
+    Dim pivot As Double, tmp As Double
+    Dim i As Long, j As Long
+
+    If low < high Then
+        pivot = arr((low + high) \ 2)
+        i = low
+        j = high
+        Do While i <= j
+            If Descending Then
+                Do While arr(i) > pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) < pivot
+                    j = j - 1
+                Loop
+            Else
+                Do While arr(i) < pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) > pivot
+                    j = j - 1
+                Loop
+            End If
+            If i <= j Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+                i = i + 1
+                j = j - 1
+            End If
+        Loop
+        QuickSort arr, low, j, Descending
+        QuickSort arr, i, high, Descending
+    End If
+End Sub
+
+
+
+#CTE
+
+Sub CalculateCTE()
+    Dim ws As Worksheet
+    Dim n As Long, i As Long
+    Dim Data() As Double
+    Dim Alpha As Double
+    Dim VaR As Double
+    Dim TotalLoss As Double
+    Dim LossCount As Long
+    Dim CTE As Double
+    
+    ' Paramètres
+    Alpha = 0.95 ' Niveau de confiance (par exemple, 0.95 pour 95%)
+    
+    ' Feuille contenant les données
+    Set ws = ThisWorkbook.Sheets("Data") ' Assurez-vous que les données se trouvent ici
+    
+    ' Lire les données dans un tableau
+    n = Application.WorksheetFunction.Count(ws.Range("A:A"))
+    ReDim Data(1 To n)
+    For i = 1 To n
+        Data(i) = ws.Cells(i, 1).Value
+    Next i
+    
+    ' Trier les données dans l'ordre croissant
+    QuickSort Data, LBound(Data), UBound(Data)
+    
+    ' Trouver le VaR (quantile pour 1 - Alpha)
+    Dim VaRIndex As Long
+    VaRIndex = Application.WorksheetFunction.RoundDown((1 - Alpha) * n, 0)
+    If VaRIndex = 0 Then VaRIndex = 1 ' Assurez qu'il y a toujours un seuil
+    VaR = Data(VaRIndex)
+    
+    ' Calculer la CTE (moyenne des pertes au-delà du VaR)
+    TotalLoss = 0
+    LossCount = 0
+    For i = VaRIndex To n
+        TotalLoss = TotalLoss + Data(i)
+        LossCount = LossCount + 1
+    Next i
+    
+    If LossCount > 0 Then
+        CTE = TotalLoss / LossCount
+    Else
+        CTE = 0 ' Si aucune valeur au-delà du VaR, CTE est 0
+    End If
+    
+    ' Afficher les résultats
+    ws.Cells(1, 3).Value = "VaR (" & Alpha * 100 & "%):"
+    ws.Cells(1, 4).Value = VaR
+    ws.Cells(2, 3).Value = "CTE (" & Alpha * 100 & "%):"
+    ws.Cells(2, 4).Value = CTE
+    
+    MsgBox "CTE Calculated: " & CTE & vbCrLf & "VaR: " & VaR, vbInformation, "CTE Calculation Complete"
+End Sub
+
+Sub QuickSort(arr As Variant, low As Long, high As Long)
+    Dim pivot As Double, tmp As Double
+    Dim i As Long, j As Long
+    
+    If low < high Then
+        pivot = arr((low + high) \ 2)
+        i = low
+        j = high
+        Do While i <= j
+            Do While arr(i) < pivot
+                i = i + 1
+            Loop
+            Do While arr(j) > pivot
+                j = j - 1
+            Loop
+            If i <= j Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+                i = i + 1
+                j = j - 1
+            End If
+        Loop
+        QuickSort arr, low, j
+        QuickSort arr, i, high
+    End If
+End Sub
+
+
+
+# Hill
+
+Sub HillEstimator()
+    Dim ws As Worksheet
+    Dim n As Long, k As Long, i As Long
+    Dim Data() As Double
+    Dim SortedData() As Double
+    Dim TailIndex As Double
+    Dim LogSum As Double
+
+    ' Paramètres
+    k = 10 ' Nombre des plus grandes observations utilisées pour l'estimation
+
+    ' Référencer la feuille contenant les données
+    Set ws = ThisWorkbook.Sheets("Data") ' Assurez-vous que les données sont dans cette feuille
+
+    ' Lire les données dans un tableau
+    n = Application.WorksheetFunction.Count(ws.Range("A:A"))
+    If k >= n Then
+        MsgBox "Le nombre d'observations k doit être inférieur à la taille totale de l'échantillon.", vbCritical, "Erreur"
+        Exit Sub
+    End If
+    ReDim Data(1 To n)
+    For i = 1 To n
+        Data(i) = ws.Cells(i, 1).Value
+    Next i
+
+    ' Trier les données dans l'ordre décroissant
+    SortedData = Data
+    QuickSort SortedData, LBound(SortedData), UBound(SortedData), Descending:=True
+
+    ' Vérifier que les données sont positives (requis pour le logarithme)
+    For i = 1 To k + 1
+        If SortedData(i) <= 0 Then
+            MsgBox "Toutes les observations utilisées doivent être strictement positives.", vbCritical, "Erreur"
+            Exit Sub
+        End If
+    Next i
+
+    ' Calculer l'estimateur de Hill
+    LogSum = 0
+    For i = 1 To k
+        LogSum = LogSum + Log(SortedData(i) / SortedData(k + 1))
+    Next i
+    TailIndex = LogSum / k
+
+    ' Afficher le résultat
+    ws.Cells(1, 3).Value = "Hill Estimator (k=" & k & "):"
+    ws.Cells(1, 4).Value = TailIndex
+
+    MsgBox "Hill Estimator Calculated: " & TailIndex, vbInformation, "Résultat"
+End Sub
+
+Sub QuickSort(arr As Variant, low As Long, high As Long, Optional Descending As Boolean = False)
+    Dim pivot As Double, tmp As Double
+    Dim i As Long, j As Long
+
+    If low < high Then
+        pivot = arr((low + high) \ 2)
+        i = low
+        j = high
+        Do While i <= j
+            If Descending Then
+                Do While arr(i) > pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) < pivot
+                    j = j - 1
+                Loop
+            Else
+                Do While arr(i) < pivot
+                    i = i + 1
+                Loop
+                Do While arr(j) > pivot
+                    j = j - 1
+                Loop
+            End If
+            If i <= j Then
+                tmp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = tmp
+                i = i + 1
+                j = j - 1
+            End If
+        Loop
+        QuickSort arr, low, j, Descending
+        QuickSort arr, i, high, Descending
+    End If
+End Sub
+
+Function HillEstimator(dataRange As Range, k As Integer) As Double
+    Dim n As Integer
+    Dim sortedData() As Double
+    Dim i As Integer, j As Integer
+    Dim temp As Double
+    Dim sumLog As Double
+    Dim Xk1 As Double
+    
+    ' Obtenir la taille des données
+    n = dataRange.Count
+    ReDim sortedData(1 To n)
+    
+    ' Copier les données dans un tableau
+    For i = 1 To n
+        sortedData(i) = dataRange.Cells(i, 1).Value
+    Next i
+    
+    ' Trier les données en ordre décroissant (Bubble Sort pour simplicité)
+    For i = 1 To n - 1
+        For j = i + 1 To n
+            If sortedData(i) < sortedData(j) Then
+                temp = sortedData(i)
+                sortedData(i) = sortedData(j)
+                sortedData(j) = temp
+            End If
+        Next j
+    Next i
+    
+    ' Vérifier si k est valide
+    If k >= n Or k <= 0 Then
+        HillEstimator = CVErr(xlErrValue) ' Erreur si k est invalide
+        Exit Function
+    End If
+    
+    ' Calcul de X(k+1)
+    Xk1 = sortedData(k + 1)
+    
+    ' Calculer la somme des logarithmes
+    sumLog = 0
+    For i = 1 To k
+        sumLog = sumLog + Log(sortedData(i) / Xk1)
+    Next i
+    
+    ' Calculer le tail index
+    HillEstimator = k / sumLog
+End Function
+
+
+Estimations typiques du Hill Estimator
+Pour les rendements des actions de grandes entreprises (comme celles de l'indice S&P 500), le Hill Estimator donne généralement un tail index compris entre 2 et 4. Cela signifie que la distribution des rendements des actions est relativement modérée en termes d'extrêmes.
+
+Pour les actions de petites capitalisations, le Hill Estimator peut être plus élevé, se situant souvent entre 4 et 6, indiquant une distribution avec une queue beaucoup plus épaisse.
+
+Pour les actions des marchés émergents, le tail index peut aussi être plus élevé, dans la gamme de 3 à 5, en raison des événements extrêmes plus fréquents dans ces économies moins stables.
+
+, l'indice de queue 𝛼 α (ou Hill Estimator) peut être approximativement donné par hill estimateur= Nu/2
+
+# Autre
+
+La méthode de l'extremum index permet d'analyser la fréquence des événements extrêmes dans les queues des distributions. Cette méthode se base sur l'observation des plus grandes valeurs (ou plus petites selon le cas) d'un échantillon de données. L'extremum index donne un indicateur quantifiant la densité des événements extrêmes.
+
+Voici un code VBA pour l'extremum index :
+
+Le code extrait les 
+𝑘
+k plus grands éléments de votre échantillon.
+Il calcule un indice basé sur la fréquence relative des événements extrêmes.
+
+
+Function ExtremumIndex(dataRange As Range, k As Integer) As Double
+    Dim n As Integer
+    Dim sortedData() As Double
+    Dim i As Integer, j As Integer
+    Dim temp As Double
+    Dim maxSum As Double
+    Dim extremumSum As Double
+    Dim extremumIndex As Double
+    
+    ' Taille des données
+    n = dataRange.Count
+    ReDim sortedData(1 To n)
+    
+    ' Copier les données dans un tableau
+    For i = 1 To n
+        sortedData(i) = dataRange.Cells(i, 1).Value
+    Next i
+    
+    ' Trier les données en ordre décroissant
+    For i = 1 To n - 1
+        For j = i + 1 To n
+            If sortedData(i) < sortedData(j) Then
+                temp = sortedData(i)
+                sortedData(i) = sortedData(j)
+                sortedData(j) = temp
+            End If
+        Next j
+    Next i
+    
+    ' Vérifier si k est valide
+    If k >= n Or k <= 0 Then
+        ExtremumIndex = CVErr(xlErrValue) ' Erreur si k est invalide
+        Exit Function
+    End If
+    
+    ' Calcul de la somme des k plus grandes valeurs
+    extremumSum = 0
+    For i = 1 To k
+        extremumSum = extremumSum + sortedData(i)
+    Next i
+    
+    ' Calcul de la somme totale des données
+    maxSum = 0
+    For i = 1 To n
+        maxSum = maxSum + sortedData(i)
+    Next i
+    
+    ' Calcul de l'indice des extrêmes
+    extremumIndex = extremumSum / maxSum
+    
+    ' Retourner l'indice des extrêmes
+    ExtremumIndex = extremumIndex
+End Function
+
+
+
+
+# autre 2
+
+Pour identifier les événements extrêmes dans les données financières, un coefficient de queue peut être utilisé pour mesurer la fréquence des événements rares. Ce coefficient quantifie combien de fois les événements extrêmes (comme de grandes pertes ou de grands gains) se produisent par rapport à l'ensemble des données.
+
+Dans ce contexte, un tel coefficient peut être utilisé dans la gestion des risques pour identifier les événements significatifs comme les krachs boursiers. Un coefficient de queue élevé signifie que des événements extrêmes se produisent fréquemment dans les données.
+
+Méthode pour calculer le coefficient de queue :
+Identifier les extrêmes : Définir un seuil pour ce que vous considérez comme un "événement extrême". Cela peut être, par exemple, une perte supérieure à un certain percentile ou un gain supérieur à un certain seuil.
+Calculer le coefficient de queue : Le coefficient de queue est simplement le ratio entre le nombre d'événements extrêmes et la taille totale de l'échantillon.
+Code VBA pour calculer le coefficient de queue :
+Le code suivant permet de calculer ce coefficient de queue en fonction des événements extrêmes. L'idée est de compter le nombre d'événements où la valeur dépasse un certain seuil, puis de diviser ce nombre par le nombre total d'observations.
+
+Code VBA pour calculer le coefficient de queue :
+
+
+Function QueueCoefficient(dataRange As Range, threshold As Double) As Double
+    Dim n As Integer
+    Dim countExtremes As Integer
+    Dim i As Integer
+    Dim value As Double
+    
+    ' Taille des données
+    n = dataRange.Count
+    countExtremes = 0
+    
+    ' Compter les événements extrêmes
+    For i = 1 To n
+        value = dataRange.Cells(i, 1).Value
+        
+        ' Comparer chaque valeur à un seuil (threshold)
+        If Abs(value) >= threshold Then
+            countExtremes = countExtremes + 1
+        End If
+    Next i
+    
+    ' Calculer le coefficient de queue (nombre d'événements extrêmes / taille totale)
+    If n > 0 Then
+        QueueCoefficient = countExtremes / n
+    Else
+        QueueCoefficient = 0 ' Eviter la division par zéro
+    End If
+End Function
+
+
+Interprétation des résultats :
+Un coefficient de queue élevé (par exemple, supérieur à 0.05) indique que des événements extrêmes se produisent fréquemment dans les données, ce qui pourrait être le cas dans des périodes de grande volatilité (par exemple, pendant un krach boursier).
+Un coefficient de queue faible (par exemple, inférieur à 0.01) indique que les événements extrêmes sont rares, ce qui est plus caractéristique des périodes de faible volatilité ou des distributions plus régulières.
