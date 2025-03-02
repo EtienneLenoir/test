@@ -1,0 +1,568 @@
+# trouver colonne
+
+Function TrouverColonne(ByVal NomRecherche As String, ByVal Plage As Range) As Integer
+    Dim Cellule As Range
+    
+    ' Recherche rapide avec Find
+    Set Cellule = Plage.Find(What:=NomRecherche, LookAt:=xlWhole, MatchCase:=False)
+
+    ' Vérifie si une correspondance a été trouvée
+    If Not Cellule Is Nothing Then
+        TrouverColonne = Cellule.Column
+    Else
+        TrouverColonne = 0 ' Retourne 0 si non trouvé
+    End If
+End Function
+
+Function TrouverColonneTableau(ByVal NomRecherche As String, ByVal Table As ListObject) As Integer
+    Dim i As Integer
+    
+    ' Parcourir les noms de colonnes du tableau
+    For i = 1 To Table.ListColumns.Count
+        If LCase(Table.ListColumns(i).Name) = LCase(NomRecherche) Then
+            TrouverColonneTableau = Table.ListColumns(i).Index + Table.Range.Column - 1
+            Exit Function
+        End If
+    Next i
+    
+    ' Retourne 0 si non trouvé
+    TrouverColonneTableau = 0
+End Function
+
+
+Function TrouverColonneTableau(ByVal NomRecherche As String, ByVal Table As ListObject) As Integer
+    Dim Dict As Object
+    Dim i As Integer
+    
+    ' Créer un dictionnaire pour un accès instantané
+    Set Dict = CreateObject("Scripting.Dictionary")
+    
+    ' Remplir le dictionnaire avec les noms de colonnes
+    For i = 1 To Table.ListColumns.Count
+        Dict(LCase(Table.ListColumns(i).Name)) = Table.ListColumns(i).Index
+    Next i
+    
+    ' Vérifier si le nom existe
+    If Dict.exists(LCase(NomRecherche)) Then
+        TrouverColonneTableau = Dict(LCase(NomRecherche)) + Table.Range.Column - 1
+    Else
+        TrouverColonneTableau = 0 ' Retourne 0 si non trouvé
+    End If
+    
+    ' Libérer la mémoire
+    Set Dict = Nothing
+End Function
+
+# ultra rapide
+
+Function TrouverColonneTableau(ByVal NomRecherche As String, ByVal Table As ListObject) As Integer
+    Dim TableauNoms As Variant
+    Dim ColIndex As Variant
+    
+    ' Stocker les noms de colonnes dans un tableau (accès ultra-rapide)
+    TableauNoms = Table.HeaderRowRange.Value
+    
+    ' Recherche avec Application.Match (ultra rapide)
+    ColIndex = Application.Match(NomRecherche, TableauNoms, 0)
+    
+    ' Vérifier si trouvé
+    If Not IsError(ColIndex) Then
+        TrouverColonneTableau = Table.Range.Column - 1 + ColIndex
+    Else
+        TrouverColonneTableau = 0 ' Retourne 0 si non trouvé
+    End If
+End Function
+
+# Array dynamique
+
+Function TrouverColonneArray(ByVal NomRecherche As String, ByVal Tableau As Variant) As Integer
+    Dim ColIndex As Variant
+    
+    ' Recherche avec Match dans l'array
+    ColIndex = Application.Match(NomRecherche, Tableau, 0)
+    
+    ' Vérifier si trouvé
+    If Not IsError(ColIndex) Then
+        TrouverColonneArray = ColIndex
+    Else
+        TrouverColonneArray = 0 ' Retourne 0 si non trouvé
+    End If
+End Function
+
+
+# chat ia
+
+
+Sub InsererAvecArrayUltraRapide()
+    Dim ws As Worksheet
+    Set ws = Sheets("Feuil1")
+    
+    Dim Donnees As Variant, NouvellesDonnees As Variant
+    Dim NbLignes As Long, DerniereCol As Long, NbColonnesNouvelles As Long
+    Dim i As Long, j As Long
+    
+    ' Détection du nombre de lignes et colonnes actuelles
+    NbLignes = ws.Cells(Rows.Count, 1).End(xlUp).Row
+    DerniereCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    
+    ' Tableau de nouvelles données à insérer (exemple)
+    NouvellesDonnees = Array(Array("A1", "B1"), Array("A2", "B2"), Array("A3", "B3"))
+    
+    ' Détection du nombre de colonnes à insérer
+    NbColonnesNouvelles = UBound(NouvellesDonnees, 2) + 1
+    
+    ' Charger les données existantes en mémoire
+    Donnees = ws.Range(ws.Cells(1, 1), ws.Cells(NbLignes, DerniereCol)).Value
+    
+    ' Création d'un tableau final avec l'espace pour les nouvelles colonnes
+    Dim DonneesFinales As Variant
+    ReDim DonneesFinales(1 To NbLignes, 1 To DerniereCol + NbColonnesNouvelles)
+    
+    ' Copier les anciennes colonnes jusqu'à la colonne d'insertion (ex: après la colonne B)
+    For i = 1 To NbLignes
+        For j = 1 To 2 ' Supposons insertion après la colonne B
+            DonneesFinales(i, j) = Donnees(i, j)
+        Next j
+    Next i
+    
+    ' Insérer les nouvelles colonnes en mémoire
+    For i = 1 To NbLignes
+        For j = 1 To NbColonnesNouvelles
+            DonneesFinales(i, j + 2) = NouvellesDonnees(i - 1)(j - 1)
+        Next j
+    Next i
+    
+    ' Copier les anciennes colonnes après la zone d'insertion
+    For i = 1 To NbLignes
+        For j = 3 To DerniereCol
+            DonneesFinales(i, j + NbColonnesNouvelles) = Donnees(i, j)
+        Next j
+    Next i
+    
+    ' Écriture des données en une seule opération
+    ws.Range(ws.Cells(1, 1), ws.Cells(NbLignes, DerniereCol + NbColonnesNouvelles)).Value = DonneesFinales
+End Sub
+
+
+Sub InsererTableauDynamique(ColSource As Integer)
+    Dim ws As Worksheet
+    Set ws = Sheets("Feuil1")
+    
+    Dim Donnees As Variant, NouvellesDonnees As Variant, DonneesFinales As Variant
+    Dim NbLignes As Long, DerniereCol As Long, NbColonnesNouvelles As Long
+    Dim i As Long, j As Long
+    
+    ' Détection du nombre de lignes et colonnes actuelles
+    NbLignes = ws.Cells(Rows.Count, 1).End(xlUp).Row
+    DerniereCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    
+    ' Tableau multidimensionnel de nouvelles données à insérer (exemple)
+    NouvellesDonnees = Array(Array("A1", "B1"), Array("A2", "B2"), Array("A3", "B3"))
+    
+    ' Nombre de colonnes du tableau à insérer
+    NbColonnesNouvelles = UBound(NouvellesDonnees, 2) + 1
+    
+    ' Charger les données existantes en mémoire
+    Donnees = ws.Range(ws.Cells(1, 1), ws.Cells(NbLignes, DerniereCol)).Value
+    
+    ' Créer un tableau final avec l'espace pour les nouvelles colonnes
+    ReDim DonneesFinales(1 To NbLignes, 1 To DerniereCol + NbColonnesNouvelles)
+    
+    ' Copier les colonnes avant la zone d’insertion
+    For i = 1 To NbLignes
+        For j = 1 To ColSource - 1
+            DonneesFinales(i, j) = Donnees(i, j)
+        Next j
+    Next i
+    
+    ' Insérer les nouvelles colonnes
+    For i = 1 To NbLignes
+        For j = 1 To NbColonnesNouvelles
+            DonneesFinales(i, ColSource + j - 1) = NouvellesDonnees(i - 1)(j - 1)
+        Next j
+    Next i
+    
+    ' Copier les anciennes colonnes après la zone d’insertion
+    For i = 1 To NbLignes
+        For j = ColSource To DerniereCol
+            DonneesFinales(i, j + NbColonnesNouvelles) = Donnees(i, j)
+        Next j
+    Next i
+    
+    ' Écriture des données en une seule opération
+    ws.Range(ws.Cells(1, 1), ws.Cells(NbLignes, DerniereCol + NbColonnesNouvelles)).Value = DonneesFinales
+End Sub
+
+# structure dict
+
+Function RecupererClesAssociees(cle As Variant, typeCle As Integer) As Collection
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+    Dim resultat As Collection
+
+    ' Initialiser le dictionnaire principal
+    Set dict1 = New Dictionary
+
+    ' Exemple de données imbriquées
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Initialiser la collection pour stocker les résultats
+    Set resultat = New Collection
+
+    ' Récupérer les clés en fonction du type de clé demandé
+    Select Case typeCle
+        Case 1
+            ' Si la clé est dans dict1, récupérer les clés associées dans dict2 et dict3
+            If dict1.Exists(cle) Then
+                Set dict2 = dict1(cle)
+                For Each Key In dict2.Keys
+                    resultat.Add Key
+                    Set dict3 = dict2(Key)
+                    For Each subKey In dict3.Keys
+                        resultat.Add subKey
+                    Next subKey
+                Next Key
+            End If
+        Case 2
+            ' Si la clé est dans dict2, récupérer les clés associées dans dict1 et dict3
+            For Each Key In dict1.Keys
+                Set dict2 = dict1(Key)
+                If dict2.Exists(cle) Then
+                    resultat.Add Key
+                    Set dict3 = dict2(cle)
+                    For Each subKey In dict3.Keys
+                        resultat.Add subKey
+                    Next subKey
+                End If
+            Next Key
+        Case 3
+            ' Si la clé est dans dict3, récupérer les clés associées dans dict1 et dict2
+            For Each Key In dict1.Keys
+                Set dict2 = dict1(Key)
+                For Each subKey In dict2.Keys
+                    Set dict3 = dict2(subKey)
+                    If dict3.Exists(cle) Then
+                        resultat.Add Key
+                        resultat.Add subKey
+                    End If
+                Next subKey
+            Next Key
+    End Select
+
+    ' Retourner la collection de résultats
+    Set RecupererClesAssociees = resultat
+End Function
+
+Function RecupererClesAssocieesOptimise(cle As Variant, typeCle As Integer) As Collection
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+    Dim resultat As Collection
+
+    ' Initialiser le dictionnaire principal
+    Set dict1 = New Dictionary
+
+    ' Exemple de données imbriquées
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Initialiser la collection pour stocker les résultats
+    Set resultat = New Collection
+
+    ' Récupérer les clés en fonction du type de clé demandé
+    Select Case typeCle
+        Case 1
+            ' Si la clé est dans dict1, récupérer les clés associées dans dict2 et dict3
+            If dict1.Exists(cle) Then
+                Set dict2 = dict1(cle)
+                For Each Key In dict2.Keys
+                    resultat.Add Key
+                    Set dict3 = dict2(Key)
+                    For Each subKey In dict3.Keys
+                        resultat.Add subKey
+                    Next subKey
+                    Exit For ' Sortir après avoir trouvé la première correspondance
+                Next Key
+            End If
+        Case 2
+            ' Si la clé est dans dict2, récupérer les clés associées dans dict1 et dict3
+            For Each Key In dict1.Keys
+                Set dict2 = dict1(Key)
+                If dict2.Exists(cle) Then
+                    resultat.Add Key
+                    Set dict3 = dict2(cle)
+                    For Each subKey In dict3.Keys
+                        resultat.Add subKey
+                    Next subKey
+                    Exit For ' Sortir après avoir trouvé la première correspondance
+                End If
+            Next Key
+        Case 3
+            ' Si la clé est dans dict3, récupérer les clés associées dans dict1 et dict2
+            For Each Key In dict1.Keys
+                Set dict2 = dict1(Key)
+                For Each subKey In dict2.Keys
+                    Set dict3 = dict2(subKey)
+                    If dict3.Exists(cle) Then
+                        resultat.Add Key
+                        resultat.Add subKey
+                        Exit For ' Sortir après avoir trouvé la première correspondance
+                    End If
+                Next subKey
+            Next Key
+    End Select
+
+    ' Retourner la collection de résultats
+    Set RecupererClesAssocieesOptimise = resultat
+End Function
+
+'*********************************************************'
+
+# TOP
+
+Function RecupererClesParentales(cle As String) As Collection
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+    Dim resultat As Collection
+    Dim Key1 As Variant, Key2 As Variant
+
+    ' Initialiser les dictionnaires
+    Set dict1 = New Dictionary
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Initialiser la collection pour stocker les résultats
+    Set resultat = New Collection
+
+    ' Parcourir dict1 pour trouver dict3 contenant la clé
+    For Each Key1 In dict1.Keys
+        Set dict2 = dict1(Key1) ' Récupérer dict2
+        For Each Key2 In dict2.Keys
+            Set dict3 = dict2(Key2) ' Récupérer dict3
+            ' Vérifier si dict3 contient la clé recherchée
+            If dict3.Exists(cle) Then
+                ' Ajouter les clés parentales à la collection
+                resultat.Add Key1 ' Clé de dict1
+                resultat.Add Key2 ' Clé de dict2
+                Exit Function ' Sortir dès qu'on trouve la clé
+            End If
+        Next Key2
+    Next Key1
+
+    ' Retourner la collection de résultats
+    Set RecupererClesParentales = resultat
+End Function
+
+
+Function RecupererClesAssocieesOptimise(cle As Variant) As Collection
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+    Dim resultat As Collection
+
+    ' Initialiser le dictionnaire principal
+    Set dict1 = New Dictionary
+
+    ' Exemple de données imbriquées
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Initialiser la collection pour stocker les résultats
+    Set resultat = New Collection
+
+    ' Parcourir dict1 pour trouver la clé dans dict3 et remonter les clés associées
+    For Each Key In dict1.Keys
+        Set dict2 = dict1(Key)
+        For Each subKey In dict2.Keys
+            Set dict3 = dict2(subKey)
+            If dict3.Exists(cle) Then
+                resultat.Add Key
+                resultat.Add subKey
+                resultat.Add cle
+                Exit Function ' Sortir de la fonction après avoir trouvé la première correspondance
+            End If
+        Next subKey
+    Next Key
+
+    ' Retourner la collection de résultats
+    Set RecupererClesAssocieesOptimise = resultat
+End Function
+
+
+
+# opti
+🚀 Optimisation : Utilisation d'un dictionnaire de correspondance inverse
+L'idée est de préparer une table de correspondance qui permet d'accéder directement aux parents (dict2 et dict1) d'une clé de dict3, au lieu de parcourir toute la structure.
+
+🔹 Étape 1 : Stocker les relations parent-enfant dans un dictionnaire global
+Nous allons créer un dictionnaire qui associe chaque clé de dict3 à ses parents.
+Dim parentMap As Dictionary
+
+Sub InitialiserStructure()
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Set parentMap = New Dictionary
+
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+
+    ' Initialiser les dictionnaires
+    Set dict1 = New Dictionary
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Construire une correspondance clé -> (parent niveau 2, parent niveau 1)
+    Dim key1 As Variant, key2 As Variant, key3 As Variant
+    For Each key1 In dict1.Keys
+        Set dict2 = dict1(key1)
+        For Each key2 In dict2.Keys
+            Set dict3 = dict2(key2)
+            For Each key3 In dict3.Keys
+                ' Stocker la relation (clé niveau 3 -> (clé niveau 2, clé niveau 1))
+                parentMap.Add key3, Array(key2, key1)
+            Next key3
+        Next key2
+    Next key1
+End Sub
+
+Function RecupererParentsRapide(cle As String) As Collection
+    Dim resultat As Collection
+    Set resultat = New Collection
+
+    ' Vérifier si la clé existe dans la correspondance inverse
+    If parentMap.Exists(cle) Then
+        Dim parents As Variant
+        parents = parentMap(cle)
+        resultat.Add parents(0) ' Clé niveau 2
+        resultat.Add parents(1) ' Clé niveau 1
+    End If
+
+    ' Retourner la collection des parents
+    Set RecupererParentsRapide = resultat
+End Function
+
+Sub TestRecuperationRapide()
+    ' Initialiser la structure une seule fois
+    InitialiserStructure
+
+    ' Chercher les parents d'une clé de dict3
+    Dim res As Collection
+    Set res = RecupererParentsRapide("cle3_1")
+
+    ' Afficher les résultats
+    Dim item As Variant
+    For Each item In res
+        Debug.Print item
+    Next item
+End Sub
+
+Function RecupererClesAssocieesOptimise(cle As Variant) As Collection
+    ' Assurez-vous d'ajouter une référence à Microsoft Scripting Runtime
+    Dim dict1 As Dictionary
+    Dim dict2 As Dictionary
+    Dim dict3 As Dictionary
+    Dim inverseDict As Dictionary
+    Dim resultat As Collection
+
+    ' Initialiser le dictionnaire principal
+    Set dict1 = New Dictionary
+    Set inverseDict = New Dictionary
+
+    ' Exemple de données imbriquées
+    Set dict2 = New Dictionary
+    Set dict3 = New Dictionary
+
+    ' Ajouter des valeurs dans dict3
+    dict3.Add "cle3_1", "valeur3_1"
+    dict3.Add "cle3_2", "valeur3_2"
+
+    ' Ajouter dict3 dans dict2
+    dict2.Add "cle2_1", dict3
+
+    ' Ajouter dict2 dans dict1
+    dict1.Add "cle1_1", dict2
+
+    ' Créer le dictionnaire de correspondance inverse
+    For Each Key In dict1.Keys
+        Set dict2 = dict1(Key)
+        For Each subKey In dict2.Keys
+            Set dict3 = dict2(subKey)
+            For Each subSubKey In dict3.Keys
+                inverseDict.Add subSubKey, Array(Key, subKey)
+            Next subSubKey
+        Next subKey
+    Next Key
+
+    ' Initialiser la collection pour stocker les résultats
+    Set resultat = New Collection
+
+    ' Utiliser le dictionnaire inverse pour récupérer les clés associées
+    If inverseDict.Exists(cle) Then
+        Dim cles As Variant
+        cles = inverseDict(cle)
+        resultat.Add cles(0)
+        resultat.Add cles(1)
+        resultat.Add cle
+    End If
+
+    ' Retourner la collection de résultats
+    Set RecupererClesAssocieesOptimise = resultat
+End Function
+
