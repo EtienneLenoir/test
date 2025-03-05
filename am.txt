@@ -566,3 +566,77 @@ Function RecupererClesAssocieesOptimise(cle As Variant) As Collection
     Set RecupererClesAssocieesOptimise = resultat
 End Function
 
+'===============================================================
+Dim myMP As clsSheetMultipage
+
+Private WithEvents cmbtn As CommandButton
+
+Private Sub MultiPage1_Change()
+
+    Call multiPageButtonTest
+    
+End Sub
+
+Private Sub Worksheet_Activate()
+
+    Call multiPageButtonTest
+    
+End Sub
+
+Sub multiPageButtonTest()
+    Set myMP = New clsSheetMultipage
+    With myMP
+        Set .MultiPage = Me.MultiPage1 ' ThisWorkbook.Worksheets("Feuil6").OLEObjects("MultiPage1")
+        'ThisWorkbook.Worksheets("Feuil6").MultiPage1
+    End With
+End Sub
+
+Public Sub Button1_Click()
+    MsgBox "Hip-Hip, Hurray MAIN2 Button 1!"
+End Sub
+
+Public Sub Button2_Click()
+    MsgBox "Hip-Hip, Hurray MAIN2 Button 2!"
+End Sub
+
+
+'---------------------------
+' in code module clsSheetMultipage
+
+Public WithEvents pMultiPage As MSForms.MultiPage
+Public WithEvents internalButton1 As MSForms.CommandButton
+Public WithEvents internalButton2 As MSForms.CommandButton
+
+Property Get MultiPage() As MSForms.MultiPage
+    Set MultiPage = pMultiPage
+End Property
+
+Property Set MultiPage(inMP As MSForms.MultiPage)
+    Set pMultiPage = inMP
+    Set internalButton1 = inMP.Pages(0).Controls("CommandButton1")
+    'Set internalButton2 = inMP.Pages(0).Controls("CommandButton2")
+    
+    
+    'Stocker la couleur originale
+    'originalColor = internalButton1.BackColor
+    'originalColor = RGB(240, 240, 10) ' Couleur classique imposée
+    'internalButton1.BackColor = RGB(40, 240, 10)
+    'internalButton2.BackColor = originalColor
+ 
+End Property
+
+Private Sub internalButton1_Click()
+
+    'internalButton1.BackColor = vbRed
+    'internalButton1.BackColor = vbGreen
+    
+    'Do stuff here or call the Button1_Click sub on the parent sheet of the multiPage
+    Call pMultiPage.Parent.Button1_Click
+End Sub
+
+Private Sub internalButton2_Click()
+    'Do stuff here or call the Button1_Click sub on the parent sheet of the multiPage
+    Call pMultiPage.Parent.Button2_Click
+End Sub
+
+
