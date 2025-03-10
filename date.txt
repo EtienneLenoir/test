@@ -1,0 +1,413 @@
+
+
+```
+Public Function LocalDateFormat() As String
+    Select Case Application.International(xlDateOrder)
+        Case 0
+            LocalDateFormat = "MM/DD/YYYY"
+        Case 1
+            LocalDateFormat = "DD/MM/YYYY"
+        Case 2
+            LocalDateFormat = "YYYY/MM/DD"
+        Case Else
+           LocalDateFormat = "DD/MM/YYYY"
+    End Select
+End Function
+```
+
+
+```
+Public Function fnPaques(wAn%) As Date
+    'Pâques est le dimanche qui suit le quatorzième jour de la
+    'Lune qui tombe le 21 mars ou immédiatement après
+
+    '** A titre d'info :************'
+    '** dtVenSaint = fPaques - 2****'
+    '** dtLunPaq = fPaques + 1******'
+    '** dtAscension = fPaques + 39**'
+    '** dtDimPent = fPaques + 49****'
+    '** dtLunPent = fPaques + 50****'
+
+    Dim wA%, wb%, wC%, wD%, wE%, wF%, wG%, wH%
+    Dim wI%, wJ%, wK%, wL%, wM%, wN%, wP%
+
+    wA = wAn Mod 19    'Calcul du rang de l'année dans le cycle lunaire qui a 19 ans
+    wb = wAn \ 100    'Calcul du siècle
+    wC = wAn Mod 100    'Calcul du rang de l'année dans le siècle
+    wD = wb \ 4
+    wE = wb Mod 4
+    wF = (wb + 8) \ 25
+    wG = (wb - wF + 1) \ 3
+    wH = (19 * wA + wb - wD - wG + 15) Mod 30
+    wI = wC \ 4
+    wK = wC Mod 4
+    wL = (32 + 2 * wE + 2 * wI - wH - wK) Mod 7
+    wM = (wA + 11 * wH + 22 * wL) \ 451
+    wN = (wH + wL - 7 * wM + 114) \ 31    'détermine le mois
+    wP = (wH + wL - 7 * wM + 114) Mod 31    'détermine le jour
+    fnPaques = DateSerial(wAn, wN, wP + 1)
+
+End Function
+```
+
+
+
+```
+Function IsFerie(Jour As Variant) As Boolean
+    'd'après Ole P Erlandsen
+    Dim ListeFeries(1 To 11) As Long, i As Integer
+    Dim tDate As Long, annee As Integer
+
+    IsFerie = False
+    tDate = CDate(Jour)
+
+    If tDate < 1 Then Exit Function
+    annee = Year(tDate)
+    If annee < 1900 Then Exit Function
+
+    'remplit la liste des fériés
+    ListeFeries(1) = CDate("1/1/" & annee)    'Jour de l'An
+    ListeFeries(2) = fnPaques(annee) + 1    'Lundi de Pâques
+    ListeFeries(3) = ListeFeries(2) + 38    'Jeudi Ascension
+    ListeFeries(4) = ListeFeries(2) + 49    'Lundi Pentecôte
+    ListeFeries(5) = CDate("1/5/" & annee)    '1er Mai
+    ListeFeries(6) = CDate("8/5/" & annee)    '8 Mai
+    ListeFeries(7) = CDate("14/7/" & annee)    '14 Juillet
+    ListeFeries(8) = CDate("15/8/" & annee)    '15 Août
+    ListeFeries(9) = CDate("1/11/" & annee)    'Toussaint
+    ListeFeries(10) = CDate("11/11/" & annee)    '14-18
+    ListeFeries(11) = CDate("25/12/" & annee)    'Noël
+
+    ' compare la date entrée avec la Liste des Fériés
+    i = 1
+    While i <= UBound(ListeFeries) And IsFerie = False
+        If tDate = ListeFeries(i) Then IsFerie = True
+        i = i + 1
+    Wend
+End Function
+```
+
+Rechercher le nombre de jours ouvrés entre deux dates
+```
+Function Work_Days(BegDate As Variant, EndDate As Variant) As Integer 
+ 
+ Dim WholeWeeks As Variant 
+ Dim DateCnt As Variant 
+ Dim EndDays As Integer 
+ 
+ On Error GoTo Err_Work_Days 
+ 
+ BegDate = DateValue(BegDate) 
+ EndDate = DateValue(EndDate) 
+ WholeWeeks = DateDiff("w", BegDate, EndDate) 
+ DateCnt = DateAdd("ww", WholeWeeks, BegDate) 
+ EndDays = 0 
+ 
+ Do While DateCnt <= EndDate 
+ If Format(DateCnt, "ddd") <> "Sun" And _ 
+ Format(DateCnt, "ddd") <> "Sat" Then 
+ EndDays = EndDays + 1 
+ End If 
+ DateCnt = DateAdd("d", 1, DateCnt) 
+ Loop 
+ 
+ Work_Days = WholeWeeks * 5 + EndDays 
+ 
+Exit Function 
+ 
+ Err_Work_Days: 
+ 
+ ' If either BegDate or EndDate is Null, return a zero 
+ ' to indicate that no workdays passed between the two dates. 
+ 
+ If Err.Number = 94 Then 
+ Work_Days = 0 
+ Exit Function 
+ Else 
+' If some other error occurs, provide a message. 
+ MsgBox "Error " & Err.Number & ": " & Err.Description 
+ End If 
+ 
+End Function
+
+```
+
+
+```
+Function last_work_day_previous_month()
+    Dim aa As Date
+    aa = Application.WorkDay(Application.EoMonth(Now, -1) - 7, 5)
+    last_work_day_previous_month = aa
+End Function
+```
+
+```
+Function WeekdayName() As String
+    Select Case Weekday(InputBox("Enter date, e.g., 06/04/2013"))
+        Case 1
+            WeekdayName = "Sunday"
+        Case 2
+            WeekdayName = "Monday"
+        Case 3
+            WeekdayName = "Tuesday"
+        Case 4
+            WeekdayName = "Wednesday"
+        Case 5
+            WeekdayName = "Thursday"
+        Case 6
+            WeekdayName = "Friday"
+        Case 7
+            WeekdayName = "Saturday"
+    End Select
+    MsgBox "It will be " & WeekdayName & "."
+End Function
+```
+
+```
+Option Explicit
+
+Sub DateAndTime()
+'   Displays the current date and time
+    Dim TheDate As String, TheTime As String
+    Dim Greeting As String
+    Dim FullName As String, FirstName As String
+    Dim SpaceInName As Long
+    
+    TheDate = Format(Date, "Long Date")
+    TheTime = Format(Time, "Medium Time")
+
+'   Determine greeting based on time
+    Select Case Time
+        Case Is < 0.5:     Greeting = "Good Morning, "
+        Case Is >= 0.7083: Greeting = "Good Evening, "
+        Case Else:         Greeting = "Good Afternoon, "
+    End Select
+
+'   Append user's first name to greeting
+    FullName = Application.UserName
+    SpaceInName = InStr(1, FullName, " ", 1)
+  
+'   Handle situation when name has no space
+    If SpaceInName = 0 Then SpaceInName = Len(FullName)
+    FirstName = Left(FullName, SpaceInName)
+    Greeting = Greeting & FirstName
+
+'   Show the message
+    MsgBox TheDate & vbCrLf & vbCrLf & "It's " & TheTime, vbOKOnly, Greeting
+End Sub
+```
+
+
+
+```
+'---------------------------------------------------------------------------------------
+' Procedure : Global_Date_Parser
+' Purpose   : Convert any date (string format, date format, any possible format) into a Date type
+'---------------------------------------------------------------------------------------
+Function Global_Date_Parser(myDate) As Date
+
+Dim jour As Variant
+Dim mois As Variant
+Dim annee As Variant
+Dim mois2 As Variant
+Dim sep As Variant
+
+'analyse du séparateur
+If InStr(1, myDate, " ", vbTextCompare) > 1 Then sep = " "
+If InStr(1, myDate, "/", vbTextCompare) > 1 Then sep = "/"
+If InStr(1, myDate, "-", vbTextCompare) > 1 Then sep = "-"
+
+jour = Split(myDate, sep)(0)
+mois = UCase(Split(myDate, sep)(1))
+annee = Split(myDate, sep)(2)
+
+'Tout type de possibilité en input
+Select Case mois
+
+    'JANVIER
+    Case "JANVIER"
+    mois2 = "01"
+    Case "JAN"
+    mois2 = "01"
+    Case "JAN."
+    mois2 = "01"
+    Case "JANUARY"
+    mois2 = "01"
+    Case "1"
+    mois2 = "01"
+    Case "01"
+    mois2 = "01"
+    
+    'FEB
+    Case "FEVRIER"
+    mois2 = "02"
+    Case "FEB"
+    mois2 = "02"
+    Case "FEB."
+    mois2 = "02"
+    Case "FEV"
+    mois2 = "02"
+    Case "FEV."
+    mois2 = "02"
+    Case UCase("fév")
+    mois2 = "02"
+    Case UCase("fév.")
+    mois2 = "02"
+    Case "FEBRUARY"
+    mois2 = "02"
+    Case "2"
+    mois2 = "02"
+    Case "02"
+    mois2 = "02"
+    
+    'MARS
+    Case "MARS"
+    mois2 = "03"
+    Case "MAR"
+    mois2 = "03"
+    Case "MAR."
+    mois2 = "03"
+    Case "MARCH"
+    mois2 = "03"
+    Case "3"
+    mois2 = "03"
+    Case "03"
+    mois2 = "03"
+    
+    'APR
+    Case "AVRIL"
+    mois2 = "04"
+    Case "APRIL"
+    mois2 = "04"
+    Case "AVR"
+    mois2 = "04"
+    Case "APR"
+    mois2 = "04"
+    Case "APR."
+    mois2 = "04"
+    Case "4"
+    mois2 = "04"
+    Case "04"
+    mois2 = "04"
+    
+    'MAY
+    Case "MAI"
+    mois2 = "05"
+    Case "MAY"
+    mois2 = "05"
+    Case "MAY."
+    mois2 = "05"
+    Case "5"
+    mois2 = "05"
+    Case "05"
+    mois2 = "05"
+    
+    'JUN
+    Case "JUIN"
+    mois2 = "06"
+    Case "JUNE"
+    mois2 = "06"
+    Case "JUN"
+    mois2 = "06"
+    Case "JUN."
+    mois2 = "06"
+    Case "6"
+    mois2 = "06"
+    Case "06"
+    mois2 = "06"
+    
+    'JUL
+    Case "JUILLET"
+    mois2 = "07"
+    Case "JUI"
+    mois2 = "07"
+    Case "JULY"
+    mois2 = "07"
+    Case "JUL"
+    mois2 = "07"
+    Case "JUL."
+    mois2 = "07"
+    Case "7"
+    mois2 = "07"
+    Case "07"
+    mois2 = "07"
+    
+    'AUG
+    Case "AOUT"
+    mois2 = "08"
+    Case "AUGUST"
+    mois2 = "08"
+    Case "AUG"
+    mois2 = "08"
+    Case "AOU"
+    mois2 = "08"
+    Case "AOU."
+    mois2 = "08"
+    Case "8"
+    mois2 = "08"
+    Case "08"
+    mois2 = "08"
+    
+    'SEP
+    Case "SEPTEMBRE"
+    mois2 = "09"
+    Case "SEPTEMBER"
+    mois2 = "09"
+    Case "SEP"
+    mois2 = "09"
+    Case "SEP."
+    mois2 = "09"
+    Case "9"
+    mois2 = "09"
+    Case "09"
+    mois2 = "09"
+    
+    'OCT
+    Case "OCTOBRE"
+    mois2 = "10"
+    Case "OCTOBER"
+    mois2 = "10"
+    Case "OCT"
+    mois2 = "10"
+    Case "OCT."
+    mois2 = "10"
+    Case "10"
+    mois2 = "10"
+    
+    'NOV
+    Case "NOVEMBRE"
+    mois2 = "11"
+    Case "NOVEMBER"
+    mois2 = "11"
+    Case "NOV"
+    mois2 = "11"
+    Case "NOV."
+    mois2 = "11"
+    Case "11"
+    mois2 = "11"
+    
+    'DEC
+    Case "DECEMBRE"
+    mois2 = "12"
+    Case "DECEMBER"
+    mois2 = "12"
+    Case UCase("déc.")
+    mois2 = "12"
+    Case UCase("déc")
+    mois2 = "12"
+    Case "DEC"
+    mois2 = "12"
+    Case "12"
+    mois2 = "12"
+    
+    Case Else
+    Global_Date_Parser = myDate
+    GoTo end_fon:
+    
+End Select
+
+Global_Date_Parser = CDate(CLng(jour) & "/" & CLng(mois2) & "/" & CLng(annee))
+
+end_fon:
+End Function
+```
