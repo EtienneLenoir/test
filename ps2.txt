@@ -1,0 +1,296 @@
+Approche basée sur l’apprentissage automatique (ML + NLP)
+📌 Objectif : Transformer l’intégralité du texte du termsheet en un vecteur de caractéristiques et entraîner un modèle pour qu’il apprenne à prédire les valeurs de gage (VG).
+
+💡 Méthodes possibles :
+
+TF-IDF (Représentation des mots en importance relative)
+
+Word Embeddings (Transforme le texte en vecteurs sémantiques)
+
+Transformers (CamemBERT, BERT, etc.) (Meilleure compréhension contextuelle)
+2. Pipeline complet
+Étape 1 : Extraction du texte des PDFs
+```
+import fitz  # PyMuPDF
+
+def extract_text_from_pdf(pdf_path):
+    """Extrait tout le texte d'un PDF"""
+    doc = fitz.open(pdf_path)
+    text = " ".join([page.get_text("text") for page in doc])
+    return text.lower()  # Mise en minuscule pour standardisation
+
+```
+
+Étape 2 : Vectorisation du texte (TF-IDF)
+On utilise TF-IDF pour convertir le texte en une matrice de caractéristiques.
+ ```
+ from sklearn.feature_extraction.text import TfidfVectorizer
+
+def vectorize_text(texts):
+    """Transforme les textes en vecteurs TF-IDF"""
+    vectorizer = TfidfVectorizer(max_features=500)  # Garde les 500 mots les plus importants
+    X = vectorizer.fit_transform(texts)
+    return X, vectorizer  # Retourne la matrice et l'objet vectorizer
+
+ 
+ ```
+etape 3 : Création du dataset complet
+On extrait le texte de tous les PDFs, on le vectorise, et on fusionne avec les valeurs de gage (VG).
+```
+import pandas as pd
+import os
+
+def build_dataset(pdf_folder, vg_csv):
+    """Construit le dataset en associant les textes des PDFs aux valeurs de gage (VG)"""
+    vg_data = pd.read_csv(vg_csv).set_index("ISIN")
+    dataset = []
+
+    for file in os.listdir(pdf_folder):
+        if file.endswith(".pdf"):
+            pdf_path = os.path.join(pdf_folder, file)
+            text = extract_text_from_pdf(pdf_path)
+            isin = extract_isin_from_filename(file)  # Fonction déjà définie
+            if isin and isin in vg_data.index:
+                dataset.append({"ISIN": isin, "text": text, "VG": vg_data.loc[isin].values.tolist()})
+
+    df = pd.DataFrame(dataset)
+    return df
+
+```
+
+Étape 4 : Entraînement du modèle de Machine Learning
+
+```
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import joblib
+
+def train_model(df):
+    """Entraîne un modèle sur le texte vectorisé"""
+    X_text, vectorizer = vectorize_text(df["text"])
+    y = df["VG"].tolist()  # Valeurs de gage sous forme de liste
+
+    X_train, X_test, y_train, y_test = train_test_split(X_text, y, test_size=0.2, random_state=42)
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    rmse = mean_squared_error(y_test, y_pred, squared=False)
+    print(f"RMSE: {rmse}")
+
+    joblib.dump(model, "vg_model.pkl")
+    joblib.dump(vectorizer, "tfidf_vectorizer.pkl")
+
+    return model, vectorizer
+```
+
+Étape 5 : Prédiction sur un nouveau produit	
+```
+def predict_vg(model, vectorizer, pdf_path):
+    """Prédit la valeur de gage pour un nouveau produit structuré"""
+    text = extract_text_from_pdf(pdf_path)
+    X_new = vectorizer.transform([text])
+    prediction = model.predict(X_new)[0]
+    return prediction
+
+
+```
+
+
+1. Pourquoi ChromaDB ici ?
+ChromaDB permet de transformer les documents en vecteurs et de faire des recherches basées sur la similarité. Plutôt que d’analyser chaque nouveau termsheet indépendamment, on peut le comparer aux anciens et en déduire les caractéristiques les plus proches.
+
+Exemple :
+🔹 Un nouveau produit structuré arrive → On l’encode en vecteur.
+🔹 On cherche les produits les plus proches dans la base avec ChromaDB.
+🔹 Si un produit similaire existe déjà, on peut prendre ses caractéristiques pour prédire la valeur de gage.
+
+pip install chromadb sentence-transformers
+
+Initialiser ChromaDB et ajouter des termsheets
+```
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+# Initialisation de ChromaDB
+chroma_client = chromadb.PersistentClient(path="chroma_db")  # Sauvegarde persistante
+collection = chroma_client.get_or_create_collection("termsheets")
+
+# Chargement du modèle d'embedding (Phrase-BERT)
+embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def add_termsheet_to_db(isin, text):
+    """Ajoute un termsheet dans ChromaDB sous forme de vecteur"""
+    vector = embedding_model.encode(text).tolist()
+    collection.add(ids=[isin], embeddings=[vector], metadatas=[{"ISIN": isin, "text": text}])
+
+def process_and_store_pdfs(pdf_folder):
+    """Parcourt les PDFs et les stocke dans ChromaDB"""
+    for file in os.listdir(pdf_folder):
+        if file.endswith(".pdf"):
+            pdf_path = os.path.join(pdf_folder, file)
+            text = extract_text_from_pdf(pdf_path)
+            isin = extract_isin_from_filename(file)
+            if isin:
+                add_termsheet_to_db(isin, text)
+
+
+```
+
+Recherche de produits similaires
+```
+def find_similar_termsheet(text, top_k=3):
+    """Trouve les produits structurés les plus similaires"""
+    vector = embedding_model.encode(text).tolist()
+    results = collection.query(query_embeddings=[vector], n_results=top_k)
+    return results["ids"][0]  # Retourne les ISINs les plus proches
+
+
+```
+Étape 4 : Prédiction de la valeur de gage
+```
+def predict_vg_from_similar_termsheet(pdf_path, vg_data):
+    """Prédit la valeur de gage en utilisant les produits similaires"""
+    text = extract_text_from_pdf(pdf_path)
+    similar_isins = find_similar_termsheet(text)
+
+    if not similar_isins:
+        return None  # Aucune correspondance trouvée
+
+    similar_vgs = vg_data.loc[vg_data.index.isin(similar_isins), ["VG_50", "VG_60", "VG_70"]]
+    return similar_vgs.mean().tolist()  # Moyenne des VG des produits similaires
+
+```
+Non, tu ne dis pas du tout une bêtise ! 💡 Combiner ChromaDB avec XGBoost a beaucoup de sens, et ça pourrait même être une solution très puissante pour ton problème.
+
+👉 Pourquoi ?
+
+ChromaDB permet de trouver rapidement des produits similaires à un nouveau termsheet.
+
+XGBoost peut ensuite utiliser ces similarités + les caractéristiques des produits pour affiner la prédiction de la valeur de gage.
+
+ # Approche hybride : ChromaDB + XGBoost
+💡 Idée :
+🔹 ChromaDB → Recherche des produits les plus similaires.
+🔹 XGBoost → Exploite ces similarités + d’autres features pour prédire la valeur de gage.
+
+Étape 1 : Extraction et stockage des termsheets dans ChromaDB
+```py
+import chromadb
+from sentence_transformers import SentenceTransformer
+import os
+
+# Initialisation de ChromaDB
+chroma_client = chromadb.PersistentClient(path="chroma_db")
+collection = chroma_client.get_or_create_collection("termsheets")
+
+# Modèle d'embedding
+embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def add_termsheet_to_db(isin, text):
+    """Ajoute un termsheet sous forme de vecteur dans ChromaDB"""
+    vector = embedding_model.encode(text).tolist()
+    collection.add(ids=[isin], embeddings=[vector], metadatas=[{"ISIN": isin, "text": text}])
+
+def process_and_store_pdfs(pdf_folder):
+    """Parcourt les PDFs et les stocke dans ChromaDB"""
+    for file in os.listdir(pdf_folder):
+        if file.endswith(".pdf"):
+            pdf_path = os.path.join(pdf_folder, file)
+            text = extract_text_from_pdf(pdf_path)  # Fonction à implémenter
+            isin = extract_isin_from_filename(file)  # Fonction à implémenter
+            if isin:
+                add_termsheet_to_db(isin, text)
+
+
+```
+
+**Étape 2 : Enrichissement des features avec ChromaDB**
+💡 Pour un nouveau produit, on va récupérer les caractéristiques des produits les plus proches et les utiliser comme nouvelles variables d’entrée pour XGBoost.
+```
+import chromadb
+from sentence_transformers import SentenceTransformer
+import os
+
+# Initialisation de ChromaDB
+chroma_client = chromadb.PersistentClient(path="chroma_db")
+collection = chroma_client.get_or_create_collection("termsheets")
+
+# Modèle d'embedding
+embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def add_termsheet_to_db(isin, text):
+    """Ajoute un termsheet sous forme de vecteur dans ChromaDB"""
+    vector = embedding_model.encode(text).tolist()
+    collection.add(ids=[isin], embeddings=[vector], metadatas=[{"ISIN": isin, "text": text}])
+
+def process_and_store_pdfs(pdf_folder):
+    """Parcourt les PDFs et les stocke dans ChromaDB"""
+    for file in os.listdir(pdf_folder):
+        if file.endswith(".pdf"):
+            pdf_path = os.path.join(pdf_folder, file)
+            text = extract_text_from_pdf(pdf_path)  # Fonction à implémenter
+            isin = extract_isin_from_filename(file)  # Fonction à implémenter
+            if isin:
+                add_termsheet_to_db(isin, text)
+
+```
+Étape 3 : Entraînement du modèle XGBoost
+Maintenant que l’on a des features enrichies par ChromaDB, on peut entraîner XGBoost.
+
+```
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import joblib
+
+def train_xgboost(df):
+    """Entraîne XGBoost sur les features extraites"""
+    X = df.drop(columns=["VG_50", "VG_60", "VG_70"])
+    y = df[["VG_50", "VG_60", "VG_70"]]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model = XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    rmse = mean_squared_error(y_test, y_pred, squared=False)
+    print(f"RMSE: {rmse}")
+
+    joblib.dump(model, "xgboost_vg_model.pkl")
+    return model
+
+
+```
+
+Étape 4 : Prédiction avec XGBoost sur un nouveau produit
+
+
+```
+def predict_vg_xgboost(model, vectorizer, pdf_path, vg_data):
+    """Prédit la valeur de gage d'un nouveau produit structuré"""
+    features = extract_features_for_xgboost(pdf_path, vg_data)
+    prediction = model.predict(np.array(features).reshape(1, -1))
+    return prediction
+
+
+```
+
+ Approche par Clustering + XGBoost
+Idée
+📌 Regrouper les produits structurés en clusters similaires avant d’entraîner un modèle XGBoost sur chaque cluster.
+
+Comment ça marche ?
+Créer des clusters en utilisant KMeans, DBSCAN ou HDBSCAN sur les embeddings ChromaDB.
+
+Former un modèle XGBoost pour chaque cluster.
+
+Lorsqu’un nouveau produit arrive, on détermine son cluster et on applique le bon modèle XGBoost.
+
+Avantages
+✅ Approche hybride entre recherche et ML, plus précise que XGBoost seul.
+✅ Chaque cluster peut avoir son propre modèle, ce qui évite les biais globaux.
+✅ Facile à interpréter, car chaque prédiction est liée à un cluster spécifique.

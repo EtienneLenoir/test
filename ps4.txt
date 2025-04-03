@@ -1,0 +1,124 @@
+a. Extraire l'ISIN et le texte du PDF, puis associer la valeur de gage :
+```py
+import os
+import re
+
+# Dossier contenant vos fichiers PDF
+pdf_folder = "chemin/vers/les/pdfs"
+pdf_files = os.listdir(pdf_folder)
+
+# Fonction pour extraire l'ISIN du nom du fichier PDF
+def extract_isin_from_filename(filename):
+    match = re.search(r'\b[A-Z]{2}\d{10}\b', filename)  # Regex pour capturer un ISIN
+    if match:
+        return match.group(0)
+    return None
+
+# Extraire l'ISIN de chaque fichier PDF
+isins_from_pdfs = [extract_isin_from_filename(f) for f in pdf_files]
+print(isins_from_pdfs)
+
+```
+
+**Extraire le texte du PDF avec PyMuPDF :**
+```py
+import fitz  # PyMuPDF
+
+# Fonction pour extraire le texte d'un fichier PDF
+def extract_text_from_pdf(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
+
+# Extraire le texte pour chaque fichier PDF
+pdf_texts = [extract_text_from_pdf(os.path.join(pdf_folder, f)) for f in pdf_files]
+
+```
+3 Charger les valeurs de gage à partir de votre fichier CSV et associer chaque ISIN avec sa valeur de gage 
+
+```py
+import pandas as pd
+
+# Charger les valeurs de gage depuis un fichier CSV
+df_valeur_de_gage = pd.read_csv('valeurs_de_gage.csv')
+
+# Exemple : Associer les ISINs des PDFs avec les valeurs de gage
+df_valeur_de_gage = df_valeur_de_gage[['ISIN', 'valeur_de_gage']]
+
+# Créer un dictionnaire ISIN -> valeur de gage
+isin_to_gage = dict(zip(df_valeur_de_gage['ISIN'], df_valeur_de_gage['valeur_de_gage']))
+
+# Vérifier la correspondance
+print(isin_to_gage)
+
+```
+4 Associer chaque texte extrait des PDFs à sa valeur de gage en utilisant l'ISIN extrait du nom de fichier :
+
+```py
+# Associer chaque texte PDF à la valeur de gage correspondante
+texts_and_gages = []
+
+for pdf_file, text in zip(pdf_files, pdf_texts):
+    # Extraire l'ISIN du nom du fichier
+    isin = extract_isin_from_filename(pdf_file)
+    
+    # Trouver la valeur de gage associée à cet ISIN
+    if isin and isin in isin_to_gage:
+        gage_value = isin_to_gage[isin]
+        texts_and_gages.append((text, gage_value))  # Stocker le texte et la valeur de gage correspondante
+
+# Vérification de la structure de l'association
+for text, gage in texts_and_gages[:2]:  # Afficher les 2 premiers éléments
+    print(f"Text extrait: {text[:200]}...")  # Afficher les 200 premiers caractères
+    print(f"Valeur de gage: {gage}")
+
+```
+5. Entraîner le modèle XGBoost :
+Maintenant que vous avez les données d'entrée (X_features) et les cibles (y_gages), vous pouvez les utiliser pour entraîner un modèle supervisé XGBoost.
+```py
+# Séparer les textes (features) et les valeurs de gage (targets)
+X_texts = [text for text, gage in texts_and_gages]
+y_gages = [gage for text, gage in texts_and_gages]
+
+# Exemple : Utiliser TF-IDF pour transformer les textes en vecteurs numériques
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+vectorizer = TfidfVectorizer(max_features=1000)
+X_features = vectorizer.fit_transform(X_texts).toarray()
+
+# Afficher la forme de la matrice de caractéristiques
+print(X_features.shape)
+
+```
+6. Prédiction pour de nouveaux PDFs :
+```py
+# Exemple de prédiction pour un nouveau fichier PDF
+new_pdf_path = 'chemin/vers/nouveau_pdf.pdf'
+new_pdf_text = extract_text_from_pdf(new_pdf_path)
+
+# Transformer le texte du nouveau PDF en vecteur avec le même TF-IDF
+new_pdf_vector = vectorizer.transform([new_pdf_text]).toarray()
+
+# Prédire la valeur de gage pour ce nouveau PDF
+predicted_valeur_de_gage = model.predict(new_pdf_vector)
+print(f'La valeur de gage prédite est : {predicted_valeur_de_gage}')
+
+```
+Résumé du processus :
+Extraction du texte des PDFs et extraction des ISIN à partir du nom du fichier PDF.
+
+Association des ISINs extraits aux valeurs de gage dans le fichier CSV.
+
+Création d’un ensemble de données où chaque texte extrait d'un PDF est directement associé à sa valeur de gage.
+
+Transformation des textes en vecteurs numériques via TF-IDF.
+
+Entraînement d'un modèle XGBoost pour prédire la valeur de gage à partir du texte du PDF.
+
+Prédictions sur de nouveaux fichiers PDF avec le modèle entraîné.
+
+Cela vous permettra d'utiliser directement les textes extraits des PDFs pour entraîner un modèle de prédiction de la valeur de gage.
+
+N'hésitez pas à me dire si quelque chose n'est pas clair ou si vous avez besoin d'aide supplémentaire !
