@@ -1,0 +1,239 @@
+# 🚀 Utiliser un modèle GGUF avec Ollama sur **Windows** (procédure complète)
+
+> 🎯 Objectif : Télécharger un modèle `.gguf` depuis Hugging Face et le rendre utilisable avec Ollama localement.
+
+---
+
+## ✅ Pré-requis
+
+### 1. Avoir **Ollama** installé
+
+- Va sur [https://ollama.com](https://ollama.com)
+- Télécharge l’installeur Windows
+- Installe-le comme n'importe quel logiciel Windows
+
+#### Vérification :
+
+- Ouvre **PowerShell**
+- Tape `ollama`  
+→ Tu devrais voir la liste des commandes disponibles.
+
+---
+
+## 🧠 Étapes détaillées
+
+---
+
+### 🟩 Étape 1 : Télécharger un modèle GGUF depuis Hugging Face
+
+1. Va sur [https://huggingface.co](https://huggingface.co)
+2. Cherche un modèle GGUF, par exemple :
+   ```
+   TheBloke Llama2 GGUF
+   ```
+3. Clique sur un dépôt, par exemple :
+   - https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF
+4. Va dans l’onglet **Files and versions**
+5. Télécharge un fichier comme :
+   ```
+   llama-2-7b-chat.Q4_K_M.gguf
+   ```
+
+💡 **Important :** Prends un fichier avec `chat` ou `instruct` dans le nom (pas `base`).
+
+---
+
+### 🟩 Étape 2 : Créer un dossier pour le modèle
+
+Avec **PowerShell**, tape :
+
+```powershell
+mkdir $env:USERPROFILE\.ollama\models\llama2-custom
+```
+
+Tu peux aussi le créer manuellement dans l’explorateur :
+```
+C:\Users\TonNomUtilisateur\.ollama\models\llama2-custom
+```
+
+---
+
+### 🟩 Étape 3 : Déplacer le fichier `.gguf`
+
+Déplace le fichier téléchargé dans le dossier :
+```
+C:\Users\TonNomUtilisateur\.ollama\models\llama2-custom\
+```
+
+Tu devrais avoir par exemple :
+```
+C:\Users\TonNomUtilisateur\.ollama\models\llama2-custom\llama-2-7b-chat.Q4_K_M.gguf
+```
+
+---
+
+### 🟩 Étape 4 : Créer le fichier `Modelfile` (sans extension)
+
+1. Ouvre **Notepad**
+2. Colle ce contenu (exemple simple) :
+
+```
+FROM gguf
+PARAMETER model llama-2-7b-chat.Q4_K_M.gguf
+```
+
+3. Enregistre sous :
+   - **Nom du fichier :** `"Modelfile"` (avec guillemets)
+   - **Type :** Tous les fichiers
+   - **Encodage :** UTF-8
+   - **Emplacement :** Dans le dossier `llama2-custom`
+
+✅ Résultat : tu dois avoir un fichier `Modelfile` **sans extension**, dans :
+```
+C:\Users\TonNomUtilisateur\.ollama\models\llama2-custom\
+```
+
+---
+
+### 🟩 Étape 5 : Créer le modèle dans Ollama
+
+Dans **PowerShell**, tape :
+
+```powershell
+ollama create llama2-custom -f $env:USERPROFILE\.ollama\models\llama2-custom\Modelfile
+```
+
+Tu verras que le modèle est en train d’être construit.
+
+---
+
+### 🟩 Étape 6 : Lancer le modèle
+
+Toujours dans PowerShell :
+
+```powershell
+ollama run llama2-custom
+```
+
+Tu peux maintenant lui parler depuis ton terminal.
+
+---
+
+## 💬 Bonus : Ajouter un prompt système par défaut
+
+Tu peux personnaliser le `Modelfile` avec un comportement assistant :
+
+```
+FROM gguf
+PARAMETER model llama-2-7b-chat.Q4_K_M.gguf
+TEMPLATE """<|system|>
+You are a helpful assistant.
+<|user|>
+{{ .Prompt }}
+<|assistant|>"""
+```
+
+---
+
+## 🧪 Test rapide
+
+```bash
+ollama run llama2-custom
+```
+
+Puis tape :
+```
+Explique-moi comment faire une sauce carbonara traditionnelle.
+```
+
+---
+
+## 🧯 En cas de souci
+
+- **Erreur : fichier introuvable** → Vérifie le nom du fichier `.gguf` dans le `Modelfile`
+- **Le fichier Modelfile est `.txt`** → Renomme-le pour supprimer l’extension
+- **Problème de RAM** → Utilise une version compressée du modèle (`Q4`, `Q5`…)
+
+---
+
+## 🙋‍♂️ Besoin d’aide ?
+
+Envoie-moi le **nom exact** de ton fichier `.gguf` et je te génère le `Modelfile` prêt à l’emploi.
+
+# autre
+
+Bonjour, j'ai des problèmes pour convertir mes fichiers GGUF en ollama. Voici ce que j'ai fait :
+
+Téléchargé Smart-Lemon-Cookie-7B-Q4_K_M.ggufdepuis https://huggingface.co/FallenMerick/Smart-Lemon-Cookie-7B-GGUF/blob/main/Smart-Lemon-Cookie-7B-Q4_K_M.gguf
+J'ai créé mon Modelfilepour contenir uniquement :
+
+FROM ~/Downloads/Smart-Lemon-Cookie-7B-Q4_K_M.gguf
+
+
+Ran ollama create Smart-Lemon-Cookie-7B -f '~/Downloads/Modelfile'qui a abouti à :
+
+# autre 2
+
+Étape 2 : Configurer le répertoire Ollama
+Ouvrez votre terminal et accédez au répertoire d'installation d'Ollama :
+cd ~/ollama/models
+
+
+Nous allons ensuite créer un Modelfileavec le contenu suivant :
+
+Fichier modèle
+FROM ./downloads/mistrallite.Q4_K_M.gguf
+
+Nous construisons ensuite un modèle Ollama en utilisant la commande suivante :
+
+ollama create mistrallite -f Modelfile	
+
+Et maintenant, voyons si nous pouvons amener le modèle à nous dire tout sur l'outil de visualisation Grafana :
+
+ollama run mistrallite "What is Grafana?"
+
+# autre 3
+Téléchargez le modèle .gguf que vous voulez. Pour cet exemple, il se trouve dans le dossier "Téléchargements" standard de Windows
+
+Créez un fichier Modelfile.txt dans C:/Users/YourWindowsName
+
+Ouvrez le fichier Modelfile.txt et insérez "from C:\Users\YourWindowsName\Downloads\MODELNAME.gguf"
+
+Enregistrez et fermez Modelfile.txt
+
+Renommez "Modelfile.txt" en "Modelfile"
+
+Ouvrez CMD et tapez "ollama create NAMEYOUWANT -f Modelfile"
+
+Attendez la fin	
+
+# Autre 4
+
+Exécution du modèle dans Ollama
+Assurez-vous que votre ollama est correctement installé en ouvrant l'invite de commande et en exécutant ollama -v.
+
+Ensuite, suivez ces étapes :
+
+Déplacez le fichier téléchargé Meta-Llama-3.1-8B-Instruct-Q4_K_M.ggufdans ce dossier C:\Users\YOUR_USER_NAME\.ollama\models de vos fenêtres.
+Créez un nouveau dossier appelé modelfiles à ce chemin C:\Users\YOUR_USER_NAME\.ollama
+Dans le dossier modelfilesMeta-Llama , créez un fichier nommé (vous pouvez utiliser le nom de votre choix) et ouvrez-le dans un éditeur de texte. Ne lui attribuez pas d'extension de fichier, comme .txt ou autre.
+Dans le fichier, indiquez le chemin d'accès au .gguffichier téléchargé. Dans notre cas, le chemin est * **C:\Users\YOUR_USER_NAME\.ollama\models\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf *.
+
+Donc dans le Meta-Llamafichier nous allons écrire :
+DE C:\Users\VOTRE_NOM_D'UTILISATEUR.ollama\models\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+
+Enregistrez maintenant le fichier et ouvrez l'invite de commande dans le répertoire modelfiles . (Appuyez simplement sur ctrl+l, tapez cmdet appuyez sur Entrée pour ouvrir l'invite de commande.)
+
+Tapez maintenant
+ollama create meta-llama -f C:\Users\YOUR_USER_NAME\.ollama\modelfiles\Meta-Llama
+
+# fin
+
+Où sont stockés les modèles Ollama ?
+Les modèles Ollama sont stockés dans le ~/.ollama/modelsrépertoire de votre machine locale. Ce répertoire contient tous les modèles que vous avez téléchargés ou créés. Ils sont stockés dans un sous-répertoire nommé blobs.
+
+Lorsqu'un modèle est téléchargé à l'aide de la ollama pullcommande, il est stocké dans le ~/.ollama/models/manifests/registry.ollama.ai/library/<model family>/latestrépertoire. Si vous spécifiez une version particulière lors de l'extraction, le modèle est stocké dans le ~/.ollama/models/manifests/registry.ollama.ai/library/<model family>/<version>répertoire.
+
+Si vous souhaitez importer un modèle personnalisé, vous pouvez créer un fichier Modelfileavec une FROMinstruction spécifiant le chemin d'accès local au modèle à importer. Après avoir créé le modèle dans Ollama à l'aide de la ollama createcommande, vous pouvez l'exécuter avec cette ollama runmême commande.
+
+Veuillez noter que ces modèles peuvent occuper un espace disque important. Par exemple, le modèle 13b Llama2 nécessite 32 Go de stockage. Il est donc important de gérer efficacement votre espace de stockage, surtout si vous travaillez avec plusieurs modèles volumineux.
