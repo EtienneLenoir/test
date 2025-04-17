@@ -1,0 +1,956 @@
+import streamlit as st
+from gpt4allj import Model
+st.set_page_config(layout='wide')
+from streamlit_option_menu import option_menu
+
+model = Model('./model/ggml-gpt4all-j.bin')
+
+def show_messages(text):
+    messages_str = [
+        f"{_['role']}: {_['content']}" for _ in st.session_state["messages"][1:]
+    ]
+    text.text_area("Messages", value=str("\n".join(messages_str)), height=400)
+
+with st.sidebar:
+    choose = option_menu("Streamlit GPT", [ "GPT Play Ground","About","Contact"],
+                         icons=['kanban', 'book', 'person lines fill'],
+                         menu_icon="cast", default_index=0,
+                         styles={
+                             "container": {"padding": "5!important", "background-color": "#262730"},
+                             "icon": {"color": "#02ab21", "font-size": "25px"},
+                             "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px",
+                                          "--hover-color": "#56755c"},
+                             "nav-link-selected": {"background-color": "#2f5335"},
+                         }
+                         )
+if choose == "About":
+    st.markdown(""" <style> .font {
+        font-size:30px ; font-family: 'Cooper Black'; color: #02ab21;} 
+        </style> """, unsafe_allow_html=True)
+    st.markdown('<p class="font">About the Streamlit GPT </p>', unsafe_allow_html=True)
+
+    st.write("This application uses GPT4ALL-J to generate answers for the questions.")
+
+elif choose == "GPT Play Ground":
+    st.markdown(""" <style> .font {
+                font-size:30px ; font-family: 'Cooper Black'; color: #02ab21;} 
+                </style> """, unsafe_allow_html=True)
+
+    BASE_PROMPT = [{"role": "AI", "content": "You are a helpful assistant."}]
+
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = BASE_PROMPT
+
+    st.markdown(""" <style> .font {
+                        font-size:30px ; font-family: 'Cooper Black'; color: #02ab21;} 
+                        </style> """, unsafe_allow_html=True)
+    st.markdown('<p class="font">GPT4 Play Ground :</p>', unsafe_allow_html=True)
+
+    text = st.empty()
+    show_messages(text)
+
+    prompt = st.text_input("Prompt:", value="Enter your message here...")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Send"):
+            with st.spinner("Generating response..."):
+                st.session_state["messages"] += [{"role": "You", "content": prompt}]
+                print(st.session_state["messages"][-1]["content"])
+                message_response = model.generate(st.session_state["messages"][-1]["content"])
+                st.session_state["messages"] += [
+                    {"role": "AI", "content": message_response}
+                ]
+                show_messages(text)
+    with col2:
+        if st.button("Clear"):
+            st.session_state["messages"] = BASE_PROMPT
+            show_messages(text)
+
+
+elif choose == "Contact":
+    st.markdown(""" <style> .font {
+            font-size:30px ; font-family: 'Cooper Black'; color: #02ab21;} 
+            </style> """, unsafe_allow_html=True)
+    st.markdown('<p class="font">Contact </p>', unsafe_allow_html=True)
+
+    st.write("Contact to ....")
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+import pyodbc
+import pandas as pd
+from taipy import Gui
+
+# 🔌 Connexion Access
+def connect_access():
+    chemin_bd = "base.accdb"  # Remplace par le chemin réel si besoin
+    conn_str = (
+        r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};'
+        fr'DBQ={chemin_bd};'
+    )
+    return pyodbc.connect(conn_str)
+
+# 🔍 Fonction de requête
+def get_data_by_isin(isin_list):
+    try:
+        conn = connect_access()
+        cursor = conn.cursor()
+        placeholders = ','.join('?' for _ in isin_list)
+        query = f"""
+            SELECT ISIN, NomInstrument, DateEmission, Prix
+            FROM TableInstruments
+            WHERE ISIN IN ({placeholders})
+        """
+        cursor.execute(query, isin_list)
+        rows = cursor.fetchall()
+        columns = [column[0] for column in cursor.description]
+        data = [dict(zip(columns, row)) for row in rows]
+        conn.close()
+        return data
+    except Exception as e:
+        print("Erreur lors de la requête :", e)
+        return []
+
+# 🧮 Variables Taipy
+isin_input = ""
+df_result = pd.DataFrame()
+
+# 🔘 Actions
+def search_action(state):
+    isin_list = [i.strip() for i in state.isin_input.split(',') if i.strip()]
+    if isin_list:
+        data = get_data_by_isin(isin_list)
+        state.df_result = pd.DataFrame(data)
+    else:
+        state.df_result = pd.DataFrame()
+
+def export_csv(state):
+    if not state.df_result.empty:
+        state.df_result.to_csv("resultats.csv", index=False)
+        print("Export CSV effectué.")
+
+def export_excel(state):
+    if not state.df_result.empty:
+        state.df_result.to_excel("resultats.xlsx", index=False)
+        print("Export Excel effectué.")
+
+# 🖼️ Interface Taipy
+page = """
+# 🔎 Requête ISIN sur base Access
+
+Entrez un ou plusieurs ISIN (séparés par des virgules) :
+
+<|{isin_input}|input|label=Liste ISIN|on_change=search_action|>
+
+<|Rechercher|button|on_action=search_action|>
+<|Exporter CSV|button|on_action=export_csv|>
+<|Exporter Excel|button|on_action=export_excel|>
+
+## Résultat
+
+<|{df_result}|table|width=100%|height=400px|>
+"""
+
+# ▶️ Lancer l'app
+Gui(page).run()
+
+https://github.com/Avaiga/demo-stock-visualization
+*****************************************************************
+
+
+
+
+
+
+
+
+
+**************************************************************
+pip install litellm
+pip install ollama
+ollama pull mistral
+
+```
+from litellm import completion
+
+response = completion(
+    model="ollama/llama3.2", 
+    messages=[{ "content": "tu parles français","role": "user"}], 
+    api_base="http://localhost:11434"
+)
+print(response)
+```
+
+```
+import litellm  
+
+response = litellm.chat_completion(
+    model="llama3.2",  # Nom du modèle correct
+    messages=[{"role": "user", "content": "Parle en français. Quel est ton langage par défaut ?"}],  
+		api_base="http://localhost:11434"
+)
+
+print(response["choices"][0]["message"]["content"])  # Affiche la réponse
+```
+
+sur cmd
+ollama run llama3.2
+
+```
+import requests
+
+response = requests.post(
+    "http://localhost:11434/api/generate",
+    json={"model": "llama3.2", "prompt": "Qu'est-ce que la gravité ?"}
+)
+
+print(response.json())  # Vérifie ce que renvoie l'API
+```
+
+ollama serve sur cmd avant
+```
+import ollama
+
+response = ollama.chat(
+    model="llama3.2",
+    messages=[
+        {
+            "role": "user",
+            "content": "Tell me an interesting fact about elephants",
+        },
+    ],
+)
+print(response["message"]["content"])
+```
+Le package Python d'Ollama propose également des fonctionnalités telles que les appels asynchrones et le streaming, qui permettent de gérer efficacement les demandes d'API et d'augmenter la vitesse perçue du modèle.
+
+À l'instar de l'API OpenAI, vous pouvez créer une fonction de chat asynchrone, puis écrire du code en continu à l'aide de la fonction asynchrone, ce qui permet des interactions efficaces et rapides avec le modèle.
+
+```
+import asyncio
+from ollama import AsyncClient
+
+async def chat():
+    """
+    Stream a chat from Llama using the AsyncClient.
+    """
+    message = {
+        "role": "user",
+        "content": "Tell me an interesting fact about elephants"
+    }
+    async for part in await AsyncClient().chat(
+        model="llama3", messages=[message], stream=True
+    ):
+        print(part["message"]["content"], end="", flush=True)
+
+
+asyncio.run(chat())
+```
+
+pip install ollama langchain langchain-community pypdf
+pip install langchain langchain-community pypdf docarray
+pip install -U langchain-ollama
+pip install docarray
+
+marche pas
+```
+from langchain_ollama import OllamaLLM, OllamaEmbeddings  # Nouveau package
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.prompts import PromptTemplate
+from langchain_community.vectorstores import DocArrayInMemorySearch
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
+# 1. Créer le modèle
+try:
+    llm = OllamaLLM(model='llama3.2')  # Utilisation de la nouvelle classe
+    embeddings = OllamaEmbeddings(model='llama3.2')  # Utilisation d'un modèle valide
+except Exception as e:
+    print(f"Erreur lors de la création du modèle Ollama: {e}")
+    exit()
+
+# 2. Charger le fichier PDF et créer un récupérateur pour fournir le contexte
+chemin_pdf = r'C:\Users\etien\OneDrive\Bureau\testpy\Cours Python.pdf'  # Chemin vers ton fichier PDF
+try:
+    loader = PyPDFLoader(chemin_pdf)
+    pages = loader.load_and_split()
+except Exception as e:
+    print(f"Erreur lors du chargement ou de la division du PDF: {e}")
+    exit()
+
+# 3. Créer le modèle de prompt
+template = """
+Répondez à la question en vous basant uniquement sur le contexte fourni.
+
+Contexte : {context}
+
+Question : {question}
+"""
+
+prompt = PromptTemplate.from_template(template)
+
+def format_docs(docs):
+  return "\n\n".join(doc.page_content for doc in docs)
+
+# 4. Créer la chaîne d'opérations
+try:
+    store = DocArrayInMemorySearch.from_documents(pages, embedding=embeddings)
+    retriever = store.as_retriever()
+except Exception as e:
+    print(f"Erreur lors de la création de la base de données de documents : {e}")
+    exit()
+
+chain = (
+  {
+    'context': retriever | format_docs,
+    'question': RunnablePassthrough(),
+  }
+  | prompt
+  | llm
+  | StrOutputParser()
+)
+
+# 5. Commencer à poser des questions et obtenir des réponses en boucle
+while True:
+  question = input('Que veux-tu apprendre du document ?\n')
+  print()
+  try:
+      response = chain.invoke({'question': question})
+      print(response)
+  except Exception as e:
+      print(f"Erreur lors de l'invocation de la chaîne : {e}")
+  print()
+```
+
+Marche !!!
+```
+import ollama
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# 1️ Charger le PDF
+
+pdf_path = r'C:\Users\etien\OneDrive\Bureau\testpy\Cours Python.pdf'  # Chemin vers ton fichier PDF
+loader = PyPDFLoader(pdf_path)
+documents = loader.load()
+
+# 2️ Diviser le texte en morceaux exploitables
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+chunks = text_splitter.split_documents(documents)
+
+# 3️ Fusionner les morceaux pour un prompt efficace
+context = "\n\n".join(chunk.page_content for chunk in chunks[:5])  # Prend les 5 premiers morceaux
+
+# 4️ Interroger Ollama avec ce contexte
+question = "Quels est ce document ?"
+prompt = f"Voici un extrait d'un document :\n\n{context}\n\nRéponds en te basant uniquement sur ce texte : {question}"
+
+response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": prompt}])
+
+print("\nRéponse de l'IA :\n", response["message"]["content"])
+```
+
+Pour utiliser Ollama en local avec un ensemble de PDFs et pouvoir poser des questions dessus, il faut mettre en place un système de RAG (Retrieval-Augmented Generation). Cela permet d'indexer les documents et d'envoyer à Ollama uniquement les parties pertinentes lors d'une requête.
+(pas de rapport https://medium.com/@arunpatidar26/rag-chromadb-ollama-python-guide-for-beginners-30857499d0a0)
+pip install ollama langchain langchain-community pypdf
+pip install chromadb
+
+https://www.trychroma.com/
+chromadb
+Crée un fichier index_pdfs.py pour extraire et stocker les documents :
+```
+import os
+import ollama
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OllamaEmbeddings
+from langchain.vectorstores import Chroma
+
+# 1️ Dossier contenant les PDF
+pdf_folder = r'C:\Users\etien\OneDrive\Bureau\testpy'# Mets ici ton dossier de PDFs
+
+vectorstore_path = "chroma_db"  # Où on stocke l'index
+
+# 2️ Charger les PDFs
+all_texts = []
+for pdf_file in os.listdir(pdf_folder):
+    if pdf_file.endswith(".pdf"):
+        print(f"📂 Chargement de {pdf_file}...")
+        loader = PyPDFLoader(os.path.join(pdf_folder, pdf_file))
+        docs = loader.load()
+        
+        # 3️⃣ Découper les documents en morceaux exploitables
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        texts = text_splitter.split_documents(docs)
+        all_texts.extend(texts)
+
+# 4️⃣ Créer un index avec ChromaDB
+print("🔍 Indexation des documents...")
+vectorstore = Chroma.from_documents(
+    documents=all_texts,
+    embedding=OllamaEmbeddings(model="llama3.2")
+)
+
+# 5️⃣ Sauvegarde de l'index
+vectorstore.persist()
+print("✅ Indexation terminée !")
+```
+✔ Charge tous les PDFs d'un dossier.
+✔ Découpe les textes pour être exploités.
+✔ Stocke les morceaux dans une base ChromaDB avec des embeddings d’Ollama.
+
+ou est fichier ici
+import os
+print(os.path.abspath("chroma_db"))
+
+3️⃣ Interroger les PDFs avec Ollama
+Crée un fichier query_pdfs.py pour poser des questions :
+
+```py
+import ollama
+from langchain.vectorstores import Chroma
+from langchain.embeddings import OllamaEmbeddings
+
+# 1️⃣ Charger l'index des PDFs
+vectorstore_path = "chroma_db"
+vectorstore = Chroma(persist_directory=vectorstore_path, embedding_function=OllamaEmbeddings(model="mistral"))
+
+# 2️⃣ Poser une question
+question = input("❓ Pose ta question sur les documents : ")
+
+# 3️⃣ Rechercher les morceaux pertinents
+docs = vectorstore.similarity_search(question, k=5)
+context = "\n\n".join([doc.page_content for doc in docs])
+
+# 4️⃣ Construire le prompt et interroger Ollama
+prompt = f"Voici des extraits de documents internes :\n\n{context}\n\nRéponds uniquement en utilisant ces informations : {question}"
+
+response = ollama.chat(model="mistral", messages=[{"role": "user", "content": prompt}])
+
+print("\n🤖 Réponse de l'IA :\n", response["message"]["content"])
+
+```
+
+marche pas
+```
+import ollama
+from langchain.vectorstores import Chroma
+from langchain.embeddings import OllamaEmbeddings
+
+# 1️⃣ Charger l'index des PDFs (avec le bon chemin)
+vectorstore_path = "C:/Users/etien/OneDrive/Bureau/testpy/chroma_db"
+vectorstore = Chroma(persist_directory=vectorstore_path, embedding_function=OllamaEmbeddings(model="llama3.2"))
+
+# 2️⃣ Poser une question
+question = input("❓ Pose ta question sur les documents : ")
+
+# 3️⃣ Rechercher les morceaux pertinents
+docs = vectorstore.similarity_search(question, k=5)
+context = "\n\n".join([doc.page_content for doc in docs])
+
+# 4️⃣ Construire le prompt et interroger Ollama
+prompt = f"Voici des extraits de documents internes :\n\n{context}\n\nRéponds uniquement en utilisant ces informations : {question}"
+
+response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": prompt}])
+
+print("\n🤖 Réponse de l'IA :\n", response["message"]["content"])
+
+```
+ Ajouter une interface Web avec Gradio ou Streamlit.
+🔹 Indexer plus de formats (Word, Excel, TXT...).
+🔹 Utiliser un modèle plus grand (ex. llama3).
+
+esssey ça
+```
+# Import required libraries
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
+import chromadb
+import os
+
+# Define the LLM model to be used
+llm_model = "llama3.2"
+
+# Configure ChromaDB
+# Initialize the ChromaDB client with persistent storage in the current directory
+chroma_client = chromadb.PersistentClient(path=os.path.join(os.getcwd(), "chroma_db"))
+
+# Define a custom embedding function for ChromaDB using Ollama
+class ChromaDBEmbeddingFunction:
+    """
+    Custom embedding function for ChromaDB using embeddings from Ollama.
+    """
+    def __init__(self, langchain_embeddings):
+        self.langchain_embeddings = langchain_embeddings
+
+    def __call__(self, input):
+        # Ensure the input is in a list format for processing
+        if isinstance(input, str):
+            input = [input]
+        return self.langchain_embeddings.embed_documents(input)
+
+# Initialize the embedding function with Ollama embeddings
+embedding = ChromaDBEmbeddingFunction(
+    OllamaEmbeddings(
+        model=llm_model,
+        base_url="http://localhost:11434"  # Adjust the base URL as per your Ollama server configuration
+    )
+)
+
+# Define a collection for the RAG workflow
+collection_name = "rag_collection_demo_1"
+collection = chroma_client.get_or_create_collection(
+    name=collection_name,
+    metadata={"description": "A collection for RAG with Ollama - Demo1"},
+    embedding_function=embedding  # Use the custom embedding function
+)
+
+# Function to add documents to the ChromaDB collection
+def add_documents_to_collection(documents, ids):
+    """
+    Add documents to the ChromaDB collection.
+    
+    Args:
+        documents (list of str): The documents to add.
+        ids (list of str): Unique IDs for the documents.
+    """
+    collection.add(
+        documents=documents,
+        ids=ids
+    )
+
+# Example: Add sample documents to the collection
+documents = [
+    "Artificial intelligence is the simulation of human intelligence processes by machines.",
+    "Python is a programming language that lets you work quickly and integrate systems more effectively.",
+    "ChromaDB is a vector database designed for AI applications."
+]
+doc_ids = ["doc1", "doc2", "doc3"]
+
+# Documents only need to be added once or whenever an update is required. 
+# This line of code is included for demonstration purposes:
+add_documents_to_collection(documents, doc_ids)
+
+# Function to query the ChromaDB collection
+def query_chromadb(query_text, n_results=1):
+    """
+    Query the ChromaDB collection for relevant documents.
+    
+    Args:
+        query_text (str): The input query.
+        n_results (int): The number of top results to return.
+    
+    Returns:
+        list of dict: The top matching documents and their metadata.
+    """
+    results = collection.query(
+        query_texts=[query_text],
+        n_results=n_results
+    )
+    return results["documents"], results["metadatas"]
+
+# Function to interact with the Ollama LLM
+def query_ollama(prompt):
+    """
+    Send a query to Ollama and retrieve the response.
+    
+    Args:
+        prompt (str): The input prompt for Ollama.
+    
+    Returns:
+        str: The response from Ollama.
+    """
+    llm = OllamaLLM(model=llm_model)
+    return llm.invoke(prompt)
+
+# RAG pipeline: Combine ChromaDB and Ollama for Retrieval-Augmented Generation
+def rag_pipeline(query_text):
+    """
+    Perform Retrieval-Augmented Generation (RAG) by combining ChromaDB and Ollama.
+    
+    Args:
+        query_text (str): The input query.
+    
+    Returns:
+        str: The generated response from Ollama augmented with retrieved context.
+    """
+    # Step 1: Retrieve relevant documents from ChromaDB
+    retrieved_docs, metadata = query_chromadb(query_text)
+    context = " ".join(retrieved_docs[0]) if retrieved_docs else "No relevant documents found."
+
+    # Step 2: Send the query along with the context to Ollama
+    augmented_prompt = f"Context: {context}\n\nQuestion: {query_text}\nAnswer:"
+    print("######## Augmented Prompt ########")
+    print(augmented_prompt)
+
+    response = query_ollama(augmented_prompt)
+    return response
+
+# Example usage
+# Define a query to test the RAG pipeline
+query = "What is artificial intelligence?"  # Change the query as needed
+response = rag_pipeline(query)
+print("######## Response from LLM ########\n", response)
+```
+
+
+# New
+
+https://medium.com/@Shamimw/building-a-local-rag-based-chatbot-using-chromadb-langchain-and-streamlit-and-ollama-9410559c8a4d
+
+ollama pull mxbai-embed-large
+pip install chromadb langchain streamlit ollama
+pip install -U langchain-chroma
+pip install --user -U langchain-community langchain-chroma
+```
+import getpass
+import os
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_ollama.chat_models import ChatOllama
+from langchain_community.vectorstores import Chroma
+from langchain_ollama.embeddings import OllamaEmbeddings
+from langchain_community.document_loaders import WebBaseLoader, CSVLoader, JSONLoader, PyPDFLoader
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+urls = ["https://blog.lesjeudis.com/guide-python" , "https://www.codeur.com/blog/meilleurs-frameworks-python/"] 
+
+
+def WebsiteLoader(urls):
+    loader = WebBaseLoader(urls)
+    return loader.load()
+
+def CSVFileLoader(file_paths):
+    docs = []
+    for file_path in file_paths:
+        loader = CSVLoader(file_path=file_path)  # Load each CSV file individually
+        docs.extend(loader.load())  # Append loaded data to the list
+    return docs
+
+
+
+def PDFLoader(pdf_files):
+    docs = []
+    for pdf_file in pdf_files:
+        loader = PyPDFLoader(file_path=pdf_file)  # Load each PDF file individually
+        docs.extend(loader.load())  # Append loaded data to the list
+    return docs
+
+
+
+url_list = WebsiteLoader(urls)
+
+
+
+llm = ChatOllama(model="llama3.2" )
+
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=100,
+    length_function=len,
+    is_separator_regex=False,
+)
+
+
+# Combine all loaded documents
+all_documents = url_list
+
+splited_documents = text_splitter.split_documents(all_documents)
+print(splited_documents)
+
+
+embeddings  = OllamaEmbeddings(
+  model='mxbai-embed-large'
+)
+persist_directory = "./chromaT_db"
+
+vectorstore = Chroma.from_documents(
+    documents=splited_documents,  # Ensure splited_documents contains valid data
+    embedding=embeddings,
+    persist_directory=persist_directory
+)
+
+# Step 2: Persist the database
+vectorstore.persist()  # ✅ Saves data to disk
+print("✅ Data successfully stored in ChromaDB!")
+
+
+```
+
+```
+import streamlit as st
+import os
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOllama
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
+from langchain_ollama.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import Chroma, Milvus, MongoDBAtlasVectorSearch, ElasticVectorSearch
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+# ---- Streamlit UI ---- #
+st.set_page_config(layout="wide")
+st.title("My Local Chatbot")
+
+st.sidebar.header("Settings")
+MODEL = st.sidebar.selectbox("Choose a Model", ["llama3.2", "deepseek-r1:1.5b"], index=0)
+MAX_HISTORY = st.sidebar.number_input("Max History", 1, 10, 2)
+CONTEXT_SIZE = st.sidebar.number_input("Context Size", 1024, 16384, 8192, step=1024)
+
+# ---- Session State Setup ---- #
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "memory" not in st.session_state or st.session_state.get("prev_context_size") != CONTEXT_SIZE:
+    st.session_state.memory = ConversationBufferMemory(return_messages=True)
+    st.session_state.prev_context_size = CONTEXT_SIZE
+
+# ---- LangChain Components ---- #  mxbai-embed-large
+llm = ChatOllama(model=MODEL, streaming=True)
+embeddings = OllamaEmbeddings(model="llama3.2")
+
+
+# Initialize Chroma vector store
+vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+
+retriever = vectorstore.as_retriever(search_type="similarity")
+qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+
+# ---- Display Chat History ---- #
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+# ---- Trim Chat Memory ---- #
+def trim_memory():
+    while len(st.session_state.chat_history) > MAX_HISTORY * 2:
+        st.session_state.chat_history.pop(0)  # Remove oldest messages
+
+
+# ---- Handle User Input ---- #
+if prompt := st.chat_input("Say something"):
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    trim_memory()
+
+    with st.chat_message("assistant"):
+        response_container = st.empty()
+
+        # Retrieve relevant documents
+        retrieved_docs = retriever.get_relevant_documents(prompt)
+        full_response = (
+            "No relevant documents found." if not retrieved_docs
+            else qa({"query": prompt}).get("result", "No response generated.")
+        )
+
+        response_container.markdown(full_response)
+        st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+
+        trim_memory()
+
+```
+
+mache
+```
+from langchain_community.vectorstores import Chroma
+from langchain_ollama.embeddings import OllamaEmbeddings
+from langchain.schema import Document
+
+from langchain_community.llms import Ollama
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# Simple chain invocation
+## LLM + Prompt
+llm = Ollama(model="llama3.2")
+output = StrOutputParser()
+prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a skilled technical writer.",
+        ),
+        ("human", "{user_input}"),
+    ]
+)
+chain = prompt | llm | output
+
+## Winner winner chicken dinner
+response = chain.invoke({"user_input": "how can langsmith help with testing?"})
+print(":::ROUND 1:::")
+print(response)
+```
+
+# pyinstaller
+
+pip install streamlit langchain langchain_community langchain-ollama python-dotenv chromadb pyinstaller
+
+
+import os
+import subprocess
+
+# Lancer l'application Streamlit
+subprocess.run(["streamlit", "run", "app.py"])
+
+
+pyinstaller --onefile --noconsole run.py
+
+https://github.com/AI4Finance-Foundation/FinRobot
+
+
+lamaIndex 	SQLDatabaseChain
+
+
+Via Langchain SQLDatabaseChain et openia
+
+pip install llama-index
+
+
+
+# Reconstituer le fichier .exe
+
+```
+$files = Get-ChildItem "C:\Users\etien\OneDrive\Bureau\GIT\part\fichier_part*.part" | Sort-Object Name
+$outFile = "C:\Users\etien\OneDrive\Bureau\GIT\part\OllamaSetup.exe"
+
+$fs = [System.IO.File]::Create($outFile)
+
+foreach ($file in $files) {
+    $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+    $fs.Write($bytes, 0, $bytes.Length)
+}
+
+$fs.Close()
+```
+
+```
+Sub TelechargerTousFichiersGitHub()
+    Dim http As Object
+    Dim JSON As Object
+    Dim fileURL As String
+    Dim fileName As String
+    Dim savePath As String
+    Dim dossier As String
+    Dim i As Integer
+    
+    ' Définition du dossier de destination
+    dossier = "C:\Users\etien\OneDrive\Bureau\VbaQuant\"
+    
+    ' Vérification et création du dossier si nécessaire
+    If Dir(dossier, vbDirectory) = "" Then
+        MkDir dossier
+    End If
+
+    ' URL de l'API GitHub pour récupérer la liste des fichiers
+    Dim repoURL As String
+    repoURL = "https://api.github.com/repos/EtienneLenoir/lf/contents/part"
+    
+    ' Création de l'objet HTTP
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    
+    ' Envoi de la requête GET pour obtenir les fichiers du dépôt
+    http.Open "GET", repoURL, False
+    http.Send
+    
+    ' Vérification du statut HTTP
+    If http.Status = 200 Then
+        ' Parser la réponse JSON
+        Set JSON = JsonConverter.ParseJson(http.responseText)
+        
+        ' Boucle sur tous les fichiers trouvés
+        For i = 1 To JSON.Count
+            ' Vérifier si c'est un fichier et non un dossier
+            If JSON(i)("type") = "file" Then
+                ' Récupérer l'URL brute du fichier
+                fileURL = JSON(i)("download_url")
+                fileName = JSON(i)("name")
+                
+                ' Définition du chemin de sauvegarde
+                savePath = dossier & fileName
+                
+                ' Téléchargement du fichier
+                TelechargerFichier fileURL, savePath
+            End If
+        Next i
+        
+        MsgBox "Tous les fichiers ont été téléchargés avec succès dans : " & dossier, vbInformation
+    Else
+        MsgBox "Erreur lors de la récupération des fichiers. Statut HTTP : " & http.Status, vbExclamation
+    End If
+    
+    ' Libération des objets
+    Set http = Nothing
+    Set JSON = Nothing
+End Sub
+
+Sub TelechargerFichier(ByVal url As String, ByVal filePath As String)
+    Dim http As Object
+    Dim fileNum As Integer
+    Dim byteData() As Byte
+    
+    ' Création de l'objet HTTP
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    
+    ' Envoi de la requête GET
+    http.Open "GET", url, False
+    http.Send
+    
+    ' Vérification du statut de la réponse
+    If http.Status = 200 Then
+        ' Récupération du contenu en binaire
+        byteData = http.responseBody
+        
+        ' Sauvegarde dans un fichier local
+        fileNum = FreeFile
+        Open filePath For Binary As #fileNum
+        Put #fileNum, , byteData
+        Close #fileNum
+    Else
+        MsgBox "Erreur lors du téléchargement du fichier : " & url, vbExclamation
+    End If
+    
+    ' Libération de l'objet HTTP
+    Set http = Nothing
+End Sub
+
+Sub ImporterTousLesFichiers()
+    Dim vbc As Object
+    Dim cheminDossier As String
+    Dim fichier As String
+    
+    ' Définition du dossier où se trouvent les fichiers
+    cheminDossier = "C:\Users\etien\OneDrive\Bureau\VbaQuant\"
+    
+    ' Vérification que le dossier existe
+    If Dir(cheminDossier, vbDirectory) = "" Then
+        MsgBox "Le dossier spécifié n'existe pas : " & cheminDossier, vbExclamation
+        Exit Sub
+    End If
+    
+    ' Récupérer le premier fichier dans le dossier
+    fichier = Dir(cheminDossier & "*.*")
+    
+    ' Parcourir tous les fichiers du dossier
+    Do While fichier <> ""
+        ' Déplacer tous les fichiers vers un emplacement défini ou exécuter une action spécifique
+        ' Exemple : Afficher les fichiers téléchargés
+        Debug.Print "Fichier récupéré : " & fichier
+        
+        ' Passer au fichier suivant
+        fichier = Dir
+    Loop
+    
+    MsgBox "Tous les fichiers ont été récupérés avec succès !", vbInformation
+End Sub
+```
