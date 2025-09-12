@@ -1,0 +1,446 @@
+' ===== Module: ArrayMergeByIsinAndHeader.bas =====
+Option Explicit
+
+' Public API :
+'   Copies values from srcArr -> dstArr when both ISIN (col 1) and Header (row 1) match.
+'   Returns the number of assigned cells.
+'
+'   Example:
+'       Dim n&
+'       n = MergeByIsinAndHeader(dstArr, srcArr, True)   ' True = overwrite existing values
+'
+'   dstArr and srcArr are 2-D Variant arrays (from Range.Value or ReDim).
+'
+Public Function MergeByIsinAndHeader( _
+    ByRef dstArr As Variant, _
+    ByRef srcArr As Variant, _
+    Optional ByVal Overwrite As Boolean = True _
+) As Long
+    ' ---- Validations ----
+    If Not IsArray(dstArr) Then Err.Raise 5, , "dstArr must be a 2-D array"
+    If Not IsArray(srcArr) Then Err.Raise 5, , "srcArr must be a 2-D array"
+    If ArrayDims(dstArr) <> 2 Or ArrayDims(srcArr) <> 2 Then Err.Raise 5, , "Both arrays must be 2-D"
+
+    ' ---- Bounds / indices (work with 0-based or 1-based seamlessly) ----
+    Dim dr1&, dr2&, dc1&, dc2&, sr1&, sr2&, sc1&, sc2&
+    dr1 = LBound(dstArr, 1): dr2 = UBound(dstArr, 1)
+    dc1 = LBound(dstArr, 2): dc2 = UBound(dstArr, 2)
+    sr1 = LBound(srcArr, 1): sr2 = UBound(srcArr, 1)
+    sc1 = LBound(srcArr, 2): sc2 = UBound(srcArr, 2)
+
+    ' Header row index and ISIN col index (first row/first col in each array)
+    Dim dHeaderRow&, dIsinCol&, sHeaderRow&, sIsinCol&
+    dHeaderRow = dr1
+    dIsinCol = dc1
+    sHeaderRow = sr1
+    sIsinCol = sc1
+
+    ' ---- Build dictionaries for fast lookup ----
+    Dim dIsinIdx As Object, sIsinIdx As Object
+    Dim dHeaderIdx As Object, sHeaderIdx As Object
+    Set dIsinIdx = CreateObject("Scripting.Dictionary")
+    Set sIsinIdx = CreateObject("Scripting.Dictionary")
+    Set dHeaderIdx = CreateObject("Scripting.Dictionary")
+    Set sHeaderIdx = CreateObject("Scripting.Dictionary")
+
+    dIsinIdx.CompareMode = vbTextCompare
+    sIsinIdx.CompareMode = vbTextCompare
+    dHeaderIdx.CompareMode = vbTextCompare
+    sHeaderIdx.CompareMode = vbTextCompare
+
+    ' Index ISINs (skip header row)
+    Dim r&, c&
+    For r = dr1 + 1 To dr2
+        Dim keyD As String
+        keyD = SafeKey(dstArr(r, dIsinCol))
+        If Len(keyD) > 0 Then
+            If Not dIsinIdx.Exists(keyD) Then dIsinIdx.Add keyD, r
+        End If
+    Next
+
+    For r = sr1 + 1 To sr2
+        Dim keyS As String
+        keyS = SafeKey(srcArr(r, sIsinCol))
+        If Len(keyS) > 0 Then
+            If Not sIsinIdx.Exists(keyS) Then sIsinIdx.Add keyS, r
+        End If
+    Next
+
+    ' Index headers (skip ISIN col)
+    For c = dc1 + 1 To dc2
+        Dim hD As String
+        hD = SafeKey(dstArr(dHeaderRow, c))
+        If Len(hD) > 0 Then
+            If Not dHeaderIdx.Exists(hD) Then dHeaderIdx.Add hD, c
+        End If
+    Next
+
+    For c = sc1 + 1 To sc2
+        Dim hS As String
+        hS = SafeKey(srcArr(sHeaderRow, c))
+        If Len(hS) > 0 Then
+            If Not sHeaderIdx.Exists(hS) Then sHeaderIdx.Add hS, c
+        End If
+    Next
+
+    ' ---- Iterate only matches (rows by ISIN, columns by header) ----
+    Dim assigns As Long
+    Dim isinKey As Variant, hdrKey As Variant
+
+    ' We loop over the smaller dictionary for efficiency
+    Dim rowKeys As Object, colKeys As Object
+    Set rowKeys = IIf(dIsinIdx.Count <= sIsinIdx.Count, dIsinIdx, sIsinIdx)
+    Set colKeys = IIf(dHeaderIdx.Count <= sHeaderIdx.Count, dHeaderIdx, sHeaderIdx)
+
+    For Each isinKey In rowKeys.Keys
+        Dim dr&, sr&
+        If dIsinIdx.Exists(isinKey) And sIsinIdx.Exists(isinKey) Then
+            dr = dIsinIdx(isinKey)
+            sr = sIsinIdx(isinKey)
+
+            For Each hdrKey In colKeys.Keys
+                Dim dc&, sc&
+                If dHeaderIdx.Exists(hdrKey) And sHeaderIdx.Exists(hdrKey) Then
+                    dc = dHeaderIdx(hdrKey)
+                    sc = sHeaderIdx(hdrKey)
+
+                    If Overwrite Then
+                        If Not ValuesEqual(dstArr(dr, dc), srcArr(sr, sc)) Then
+                            dstArr(dr, dc) = srcArr(sr, sc)
+                            assigns = assigns + 1
+                        End If
+                    Else
+                        If IsEmptyOrNull(dstArr(dr, dc)) Then
+                            dstArr(dr, dc) = srcArr(sr, sc)
+                            assigns = assigns + 1
+                        End If
+                    End If
+                End If
+            Next hdrKey
+        End If
+    Next isinKey
+
+    MergeByIsinAndHeader = assigns
+End Function
+
+' ===== Helpers =====
+
+Private Function ArrayDims(ByVal v As Variant) As Long
+    ' Returns the number of dimensions of a Variant array
+    On Error GoTo ExitFn
+    Dim i&, lb&, ub&
+    i = 0
+    Do
+        i = i + 1
+        lb = LBound(v, i)
+        ub = UBound(v, i)
+    Loop
+ExitFn:
+    ArrayDims = i - 1
+End Function
+
+Private Function SafeKey(ByVal v As Variant) As String
+    ' Normalize keys: trim + CStr for text compare; treat Null/Empty/""
+    If IsError(v) Then
+        SafeKey = vbNullString
+    ElseIf IsNull(v) Or IsEmpty(v) Then
+        SafeKey = vbNullString
+    Else
+        SafeKey = Trim$(CStr(v))
+    End If
+End Function
+
+Private Function IsEmptyOrNull(ByVal v As Variant) As Boolean
+    IsEmptyOrNull = (IsEmpty(v) Or IsNull(v) Or (VarType(v) = vbString And Len(v) = 0))
+End Function
+
+Private Function ValuesEqual(ByVal a As Variant, ByVal b As Variant) As Boolean
+    If IsEmptyOrNull(a) And IsEmptyOrNull(b) Then
+        ValuesEqual = True
+    ElseIf IsNumeric(a) And IsNumeric(b) Then
+        ValuesEqual = (CDbl(a) = CDbl(b))
+    Else
+        ValuesEqual = (CStr(a) = CStr(b))
+    End If
+End Function
+
+
+Sub DemoMerge()
+    Dim dstArr As Variant, srcArr As Variant
+    ' Exemple : lire deux plages
+    dstArr = ThisWorkbook.Worksheets("Feuil1").Range("A1").CurrentRegion.Value
+    srcArr = ThisWorkbook.Worksheets("Feuil2").Range("A1").CurrentRegion.Value
+
+    Dim changed&
+    changed = MergeByIsinAndHeader(dstArr, srcArr, True) ' True = autoriser l’écrasement
+
+    ' Écrire le résultat dans la destination (même taille que la plage lue)
+    ThisWorkbook.Worksheets("Feuil1").Range("A1").Resize( _
+        UBound(dstArr, 1) - LBound(dstArr, 1) + 1, _
+        UBound(dstArr, 2) - LBound(dstArr, 2) + 1 _
+    ).Value = dstArr
+
+    MsgBox "Cellules mises à jour : " & changed, vbInformation
+End Sub
+
+
+
+# copy
+
+' ===== Module: ArrayConcatTools.bas =====
+Option Explicit
+
+' ─────────────────────────────────────────────────────────────────────────────
+' Public API
+' ─────────────────────────────────────────────────────────────────────────────
+' 1) PrependColumn : ajoute une colonne à gauche (ex. ISIN)
+'    - header : valeur de l’en-tête (ligne des labels)
+'    - colValues : vecteur (1D) ou plage (1 colonne/1 ligne) contenant les valeurs
+'    - UseFirstValueAsHeader:=True si colValues inclut déjà l’en-tête
+'
+' 2) HCat2D : concatène deux tableaux 2D par colonnes (côte à côte)
+'    - Même nombre de lignes requis
+'
+' 3) VCat2D : concatène deux tableaux 2D par lignes (l’un sous l’autre)
+'    - Même nombre de colonnes requis
+'
+Public Function PrependColumn( _
+    ByRef arr As Variant, _
+    ByVal header As Variant, _
+    ByRef colValues As Variant, _
+    Optional ByVal UseFirstValueAsHeader As Boolean = False _
+) As Variant
+    Validate2D arr
+
+    Dim r1&, r2&, c1&, c2&
+    r1 = LBound(arr, 1): r2 = UBound(arr, 1)
+    c1 = LBound(arr, 2): c2 = UBound(arr, 2)
+
+    Dim vec() As Variant, nRows&, need&
+    nRows = r2 - r1 + 1
+
+    vec = ToVector(colValues) ' 0-based vector
+
+    If UseFirstValueAsHeader Then
+        If UBound(vec) - LBound(vec) + 1 <> nRows Then _
+            Err.Raise 5, , "colValues (with header) must have exactly " & nRows & " items."
+    Else
+        need = nRows - 1
+        If UBound(vec) - LBound(vec) + 1 <> need Then _
+            Err.Raise 5, , "colValues must have exactly " & need & " items (without header)."
+    End If
+
+    Dim outArr As Variant
+    ReDim outArr(r1 To r2, c1 To c2 + 1)
+
+    ' Copie données existantes (bloc)
+    Dim r&, c&
+    For r = r1 To r2
+        For c = c1 To c2
+            outArr(r, c + 1) = arr(r, c)
+        Next c
+    Next r
+
+    ' En-tête ISIN (colonne nouvelle = c1)
+    If UseFirstValueAsHeader Then
+        outArr(r1, c1) = vec(0)
+    Else
+        outArr(r1, c1) = header
+    End If
+
+    ' Corps de colonne ISIN
+    Dim i&, baseRow&
+    baseRow = r1 + 1
+
+    If UseFirstValueAsHeader Then
+        i = 1 ' vec(0) déjà utilisé comme header
+        For r = baseRow To r2
+            outArr(r, c1) = vec(i): i = i + 1
+        Next r
+    Else
+        i = 0
+        For r = baseRow To r2
+            outArr(r, c1) = vec(i): i = i + 1
+        Next r
+    End If
+
+    PrependColumn = outArr
+End Function
+
+Public Function HCat2D(ByRef leftArr As Variant, ByRef rightArr As Variant) As Variant
+    Validate2D leftArr
+    Validate2D rightArr
+
+    Dim lr1&, lr2&, lc1&, lc2&, rr1&, rr2&, rc1&, rc2&
+    lr1 = LBound(leftArr, 1): lr2 = UBound(leftArr, 1)
+    lc1 = LBound(leftArr, 2): lc2 = UBound(leftArr, 2)
+    rr1 = LBound(rightArr, 1): rr2 = UBound(rightArr, 1)
+    rc1 = LBound(rightArr, 2): rc2 = UBound(rightArr, 2)
+
+    If (lr2 - lr1) <> (rr2 - rr1) Then _
+        Err.Raise 5, , "HCat2D: both arrays must have same number of rows."
+
+    Dim outArr As Variant, r&, c&, outC1&, outC2&
+    outC1 = lc1
+    outC2 = lc2 + (rc2 - rc1 + 1)
+    ReDim outArr(lr1 To lr2, outC1 To outC2)
+
+    ' Copie gauche
+    For r = lr1 To lr2
+        For c = lc1 To lc2
+            outArr(r, outC1 + (c - lc1)) = leftArr(r, c)
+        Next c
+    Next r
+
+    ' Copie droite (à la suite)
+    Dim offsetC&: offsetC = (lc2 - lc1 + 1)
+    For r = rr1 To rr2
+        For c = rc1 To rc2
+            outArr(lr1 + (r - rr1), outC1 + offsetC + (c - rc1)) = rightArr(r, c)
+        Next c
+    Next r
+
+    HCat2D = outArr
+End Function
+
+Public Function VCat2D(ByRef topArr As Variant, ByRef bottomArr As Variant) As Variant
+    Validate2D topArr
+    Validate2D bottomArr
+
+    Dim tr1&, tr2&, tc1&, tc2&, br1&, br2&, bc1&, bc2&
+    tr1 = LBound(topArr, 1): tr2 = UBound(topArr, 1)
+    tc1 = LBound(topArr, 2): tc2 = UBound(topArr, 2)
+    br1 = LBound(bottomArr, 1): br2 = UBound(bottomArr, 1)
+    bc1 = LBound(bottomArr, 2): bc2 = UBound(bottomArr, 2)
+
+    If (tc2 - tc1) <> (bc2 - bc1) Then _
+        Err.Raise 5, , "VCat2D: both arrays must have same number of columns."
+
+    Dim outArr As Variant, r&, c&, outR1&, outR2&
+    outR1 = tr1
+    outR2 = tr2 + (br2 - br1 + 1)
+    ReDim outArr(outR1 To outR2, tc1 To tc2)
+
+    ' Copie haut
+    For r = tr1 To tr2
+        For c = tc1 To tc2
+            outArr(r, c) = topArr(r, c)
+        Next c
+    Next r
+
+    ' Copie bas (à la suite)
+    Dim offsetR&: offsetR = (tr2 - tr1 + 1)
+    For r = br1 To br2
+        For c = bc1 To bc2
+            outArr(outR1 + offsetR + (r - br1), tc1 + (c - bc1)) = bottomArr(r, c)
+        Next c
+    Next r
+
+    VCat2D = outArr
+End Function
+
+' ─────────────────────────────────────────────────────────────────────────────
+' Helpers (rapides & robustes)
+' ─────────────────────────────────────────────────────────────────────────────
+Private Sub Validate2D(ByRef v As Variant)
+    If Not IsArray(v) Then Err.Raise 5, , "Expected a 2-D array."
+    If ArrayDims(v) <> 2 Then Err.Raise 5, , "Expected a 2-D array."
+    ' Protège contre tableaux “vides” 1x1 de certaines APIs? Ici on accepte tel quel.
+End Sub
+
+Private Function ArrayDims(ByVal v As Variant) As Long
+    On Error GoTo ExitFn
+    Dim i&, lb&, ub&
+    i = 0
+    Do
+        i = i + 1
+        lb = LBound(v, i): ub = UBound(v, i)
+    Loop
+ExitFn:
+    ArrayDims = i - 1
+End Function
+
+' Aplatit une plage/array 1D/2D en vecteur 0-based (lecture row- ou col-vector)
+Private Function ToVector(ByRef v As Variant) As Variant()
+    Dim res() As Variant
+    If Not IsArray(v) Then
+        ReDim res(0 To 0): res(0) = v
+        ToVector = res: Exit Function
+    End If
+
+    Dim dims&: dims = ArrayDims(v)
+    If dims = 1 Then
+        Dim n&, i&, lb&, ub&
+        lb = LBound(v): ub = UBound(v): n = ub - lb + 1
+        ReDim res(0 To n - 1)
+        For i = 0 To n - 1
+            res(i) = v(lb + i)
+        Next i
+        ToVector = res: Exit Function
+    ElseIf dims = 2 Then
+        Dim r1&, r2&, c1&, c2&, n2&, r&, c&, k&
+        r1 = LBound(v, 1): r2 = UBound(v, 1)
+        c1 = LBound(v, 2): c2 = UBound(v, 2)
+
+        If (r2 - r1 + 1) = 1 Then
+            ' 1 ligne, plusieurs colonnes
+            n2 = c2 - c1 + 1
+            ReDim res(0 To n2 - 1)
+            k = 0
+            For c = c1 To c2
+                res(k) = v(r1, c): k = k + 1
+            Next c
+        ElseIf (c2 - c1 + 1) = 1 Then
+            ' 1 colonne, plusieurs lignes
+            n2 = r2 - r1 + 1
+            ReDim res(0 To n2 - 1)
+            k = 0
+            For r = r1 To r2
+                res(k) = v(r, c1): k = k + 1
+            Next r
+        Else
+            Err.Raise 5, , "ToVector: Expect 1 row or 1 column."
+        End If
+        ToVector = res: Exit Function
+    Else
+        Err.Raise 5, , "ToVector: Unsupported dimensions."
+    End If
+End Function
+
+Sub Demo_AddIsinColumn()
+    Dim data As Variant, isins As Variant, outArr As Variant
+
+    ' Ex: deux plages
+    data = Sheets("Feuil1").Range("A1").CurrentRegion.Value     ' pas d’ISIN
+    isins = Sheets("Feuil2").Range("A1").CurrentRegion.Columns(1).Value ' colonne ISIN (avec en-tête)
+
+    ' Si votre vecteur ISIN inclut l’en-tête dans la 1ère cellule :
+    outArr = PrependColumn(data, "ISIN", isins, True)
+
+    ' Sinon (vous fournissez l’en-tête séparément et un vecteur sans en-tête) :
+    ' outArr = PrependColumn(data, "ISIN", Sheets("Feuil2").Range("A2:A999").Value, False)
+
+    ' Restituer en feuille (une seule écriture)
+    Sheets("Feuil1").Range("A1").Resize( _
+        UBound(outArr, 1) - LBound(outArr, 1) + 1, _
+        UBound(outArr, 2) - LBound(outArr, 2) + 1 _
+    ).Value = outArr
+End Sub
+
+Sub Demo_HCat_VCat()
+    Dim A As Variant, B As Variant, C As Variant
+
+    A = Sheets("Feuil1").Range("A1").CurrentRegion.Value
+    B = Sheets("Feuil2").Range("A1").CurrentRegion.Value
+
+    ' Horizontal (côte à côte) : même nombre de lignes
+    C = HCat2D(A, B)
+
+    ' Vertical (l’un sous l’autre) : même nombre de colonnes
+    ' C = VCat2D(A, B)
+
+    Sheets("Résultat").Range("A1").Resize( _
+        UBound(C, 1) - LBound(C, 1) + 1, _
+        UBound(C, 2) - LBound(C, 2) + 1 _
+    ).Value = C
+End Sub
