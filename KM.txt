@@ -1,0 +1,1418 @@
+1. Reporting descriptif (classique)
+	• Par intervenant et dossier
+		○ Encours (montant consommé) vs limite du crédit
+		○ Couverture : valeur nantie / encours consommé → ratio de couverture
+		○ Montants disponibles (limite - consommé)
+	• Par portefeuille global
+		○ Total crédits octroyés
+		○ Taux d’utilisation (consommé / limite)
+		○ Taux moyen de couverture
+		○ Répartition par dossiers → concentration des risques
+➡️ Cela permet déjà d’identifier les dossiers où :
+	• l’encours est proche de la limite,
+	• le nantissement ne couvre pas le crédit,
+plusieurs intervenants sont liés (effet de groupe).
+
+
+2. Reporting risques
+	• Risque de liquidité / couverture :
+		○ Ratio de couverture < 100% → risque de perte si défaut
+		○ Classement des dossiers par niveau de couverture (zones vertes, oranges, rouges).
+	• Concentration du risque :
+		○ % du total crédit concentré sur les 5 plus gros dossiers
+		○ % de crédits sans nantissement suffisant
+	• Exposition par intervenant :
+		○ Identifier les "groupes familiaux" (père et fils) pour voir l’exposition consolidée.
+
+
+3. Statistiques / KPIs
+	• Moyenne, médiane, écart-type du taux d’utilisation et du ratio de couverture
+	• Histogrammes de distribution (ex : combien de dossiers ont un ratio de couverture < 80%, 100%, >150%)
+	• Corrélations :
+		○ Entre valeur nantie et montant consommé
+		○ Entre limite de crédit et consommation réelle
+
+4. Approche Machine Learning / avancée
+Si tu veux aller plus loin :
+	• Modèle de probabilité de défaut (PD)
+		○ Variables possibles : taux d’utilisation, ratio de couverture, dépendance entre intervenants, fréquence de dépassements.
+		○ Cible : défaut (1) / pas défaut (0) (si tu as un historique).
+	• Segmentation client (clustering)
+		○ Grouper les dossiers selon leur profil de risque (faible, moyen, élevé).
+	• Stress tests
+		○ Simuler une baisse de la valeur nantie (ex : -20% sur les garanties) → mesurer combien de dossiers deviennent sous-couverts.
+	• Value at Risk (VaR crédit simplifiée)
+		○ Probabilité × perte attendue si défaut (perte = encours – valeur nantie).
+
+
+5. Idées de visualisation
+	• Heatmap des dossiers avec taux d’utilisation vs couverture
+	• Barres empilées : limite vs encours consommé vs valeur nantie
+	• Pareto : 20% des dossiers représentant 80% du risque
+Courbes de stress test (impact sur portefeuille si baisse des sûretés)
+
+
+| Modèle               | Type               | Détecte quoi ?                      | Paramètres clés | Cas d’usage crédit                                         |
+| -------------------- | ------------------ | ----------------------------------- | --------------- | ---------------------------------------------------------- |
+| **Isolation Forest** | Anomalie           | Points “hors norme”                 | contamination   | Dossiers suspects (utilisation extrême, couverture faible) |
+| **DBSCAN**           | Anomalie + Cluster | Zones de densité + points isolés    | eps, minPts     | Regroupe dossiers similaires + repère hors-densité         |
+| **K-Means**          | Clustering         | Segments sphériques                 | k               | Segments de risque (prudent, risqué, moyen)                |
+| **GMM**              | Clustering         | Segments elliptiques, probabilistes | k               | Segmentation probabiliste (certitude d’appartenance)       |
+
+
+```vb
+#!/usr/bin/env python3
+"""
+Risk ML — 4 algos (IsolationForest, DBSCAN, KMeans, GMM)
+
+⚠️ Version "features minimales" SANS LGD/EAD.
+
+Colonnes attendues (arguments) :
+  - --col-limite       : Montant de la limite ("Limote"/"Limite")
+  - --col-consomme     : Montant consommé (tirage / valeur consommée)
+  - --col-nantie       : Valeur nantie (sûreté)
+
+Features calculées (pas de LGD/EAD) :
+  1) EcartLimite        = Limite - Consomme
+  2) RatioCouverture    = Nantie / Consomme
+  3) TauxUtilisation    = Consomme / Limite
+  4) Nantie_sur_Limite  = Nantie / Limite
+  5) EcartRelatif       = (Limite - Consomme) / Limite
+  6) Gap_Nantie_Cons    = Consomme - Nantie   (>= peut être négatif, info brute)
+
+Optionnel : colonnes d'identification (--col-dossier / --col-intervenant)
+
+Sortie : <nom>_four_algos.xlsx avec feuilles
+  - Features, IsolationForest, DBSCAN, KMeans, GMM, Summary
+
+Exemple :
+  python risk_four_algos_minimal.py \
+    --path "/chemin" \
+    --filename "donnees.xlsx" \
+    --sheet "Feuil1" \
+    --col-limite "LimiteCredit" \
+    --col-consomme "MontantConsomme" \
+    --col-nantie "ValeurNantie" \
+    --kmeans-k 4 --gmm-k 4 --dbscan-eps 0.8 --dbscan-min-samples 10
+"""
+
+import argparse
+import os
+import sys
+from typing import Optional, List
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import RobustScaler
+from sklearn.ensemble import IsolationForest
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.mixture import GaussianMixture
+
+
+# ---------------------------- IO ---------------------------- #
+
+def read_table(path: str, filename: str, sheet: Optional[str]) -> pd.DataFrame:
+    fp = os.path.join(path, filename)
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f"Fichier introuvable: {fp}")
+    ext = os.path.splitext(filename.lower())[1]
+    if ext in {".xlsx", ".xlsm", ".xls"}:
+        return pd.read_excel(fp, sheet_name=sheet) if sheet else pd.read_excel(fp)
+    elif ext in {".csv", ".txt"}:
+        try:
+            return pd.read_csv(fp)
+        except UnicodeDecodeError:
+            return pd.read_csv(fp, encoding="latin-1", sep=None, engine="python")
+    else:
+        raise ValueError("Extension non supportée. Utilisez .xlsx/.xls/.csv/.txt")
+
+
+def check_columns(df: pd.DataFrame, cols: List[str]):
+    miss = [c for c in cols if c and c not in df.columns]
+    if miss:
+        raise KeyError(f"Colonnes manquantes: {miss}. Dispo: {list(df.columns)}")
+
+
+# ---------------------- Feature engineering ---------------------- #
+
+def compute_features(df: pd.DataFrame, c_lim: str, c_con: str, c_nan: str) -> pd.DataFrame:
+    out = df.copy()
+    for c in [c_lim, c_con, c_nan]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+
+    # Remplissages de base
+    out[c_lim] = out[c_lim].fillna(0)
+    out[c_con] = out[c_con].fillna(0)
+    out[c_nan] = out[c_nan].fillna(0)
+
+    # Combinaisons demandées
+    out["EcartLimite"] = (out[c_lim] - out[c_con])
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out["RatioCouverture"] = (out[c_nan] / out[c_con]).replace([np.inf, -np.inf], np.nan)
+        out["TauxUtilisation"] = (out[c_con] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["Nantie_sur_Limite"] = (out[c_nan] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["EcartRelatif"] = ((out[c_lim] - out[c_con]) / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+
+    out["Gap_Nantie_Cons"] = out[c_con] - out[c_nan]
+
+    # Prépare matrice d'entraînement
+    feat_cols = [
+        "EcartLimite",
+        "RatioCouverture",
+        "TauxUtilisation",
+        "Nantie_sur_Limite",
+        "EcartRelatif",
+        "Gap_Nantie_Cons",
+    ]
+
+    X = out[feat_cols].copy()
+    # Imputer NaN par médiane (robuste aux outliers)
+    for col in feat_cols:
+        X[col] = X[col].fillna(X[col].median())
+
+    scaler = RobustScaler()
+    Xs = scaler.fit_transform(X)
+    Xs = pd.DataFrame(Xs, columns=[f"scaled_{c}" for c in feat_cols], index=out.index)
+
+    return pd.concat([out, Xs], axis=1)
+
+
+# --------------------------- Models --------------------------- #
+
+def run_isolation_forest(df: pd.DataFrame, contamination: float, random_state: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    model = IsolationForest(contamination=contamination, random_state=random_state)
+    labels = model.fit_predict(df[feats])  # -1 anomaly, 1 normal
+    scores = model.decision_function(df[feats])  # plus grand = plus normal
+
+    out = df.copy()
+    out["IF_label"] = labels
+    out["IF_is_anomaly"] = out["IF_label"].eq(-1)
+    out["IF_score"] = scores
+    return out
+
+
+def run_dbscan(df: pd.DataFrame, eps: float, min_samples: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    model = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = model.fit_predict(df[feats])
+    out = df.copy()
+    out["DBSCAN_label"] = labels  # -1 = bruit/anomalie
+    out["DBSCAN_is_noise"] = out["DBSCAN_label"].eq(-1)
+    return out
+
+
+def run_kmeans(df: pd.DataFrame, k: int, random_state: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    km = KMeans(n_clusters=k, n_init=20, random_state=random_state)
+    labels = km.fit_predict(df[feats])
+    dists = km.transform(df[feats])
+    out = df.copy()
+    out["KMeans_label"] = labels
+    for i in range(k):
+        out[f"KMeans_dist_{i}"] = dists[:, i]
+    return out
+
+
+def run_gmm(df: pd.DataFrame, k: int, random_state: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    gmm = GaussianMixture(n_components=k, n_init=5, random_state=random_state)
+    gmm.fit(df[feats])
+    labels = gmm.predict(df[feats])
+    probs = gmm.predict_proba(df[feats])
+    out = df.copy()
+    out["GMM_label"] = labels
+    for i in range(k):
+        out[f"GMM_prob_{i}"] = probs[:, i]
+    return out
+
+
+# --------------------------- Summary --------------------------- #
+
+def compute_limit_bins(lim_series: pd.Series, mode: str = "auto", bin_count: Optional[int] = None,
+                        quantiles: Optional[int] = None, custom_bins: Optional[str] = None) -> np.ndarray:
+    s = pd.to_numeric(lim_series, errors="coerce").dropna()
+    n = len(s)
+    if n == 0:
+        return np.array([0.0, np.inf])
+
+    def sturges_bins():
+        k = int(np.ceil(np.log2(n))) + 1
+        return max(3, min(10, k))
+
+    if mode == "business":
+        return np.array([0.0, 10_000_000, 30_000_000, 100_000_000, np.inf], dtype=float)
+
+    if mode == "custom" and custom_bins:
+        edges = []
+        for tok in [t.strip() for t in custom_bins.split(",") if t.strip()]:
+            if tok.lower() in {"inf", "+inf", "infty", "infinite"}:
+                edges.append(np.inf)
+            else:
+                edges.append(float(tok))
+        edges = np.array(sorted(edges))
+        if edges[0] > 0:
+            edges = np.concatenate([[0.0], edges])
+        if edges[-1] != np.inf:
+            edges = np.concatenate([edges, [np.inf]])
+        return edges
+
+    if mode in {"auto", "quantile"}:
+        k = bin_count or quantiles or sturges_bins()
+        qs = np.linspace(0, 1, k + 1)
+        edges = np.unique(np.quantile(s, qs))
+        # Assurer bornes
+        if edges[0] > 0:
+            edges = np.concatenate([[0.0], edges])
+        if edges[-1] != np.inf:
+            edges = np.concatenate([edges, [np.inf]])
+        return edges
+
+    # Modes basés sur largeur de bin
+    x_min, x_max = float(s.min()), float(s.max())
+    if x_min == x_max:
+        return np.array([0.0, x_max, np.inf])
+
+    if mode == "sturges":
+        k = bin_count or (int(np.ceil(np.log2(n))) + 1)
+    elif mode == "scott":
+        h = 3.5 * float(np.std(s)) * (n ** (-1/3))
+        k = int(np.ceil((x_max - x_min) / max(h, 1e-9)))
+    elif mode == "fd":
+        iqr = float(np.subtract(*np.percentile(s, [75, 25])))
+        h = 2 * iqr * (n ** (-1/3))
+        k = int(np.ceil((x_max - x_min) / max(h, 1e-9)))
+    else:
+        k = sturges_bins()
+
+    k = int(max(3, min(20, k)))
+    edges = np.linspace(x_min, x_max, k + 1)
+    # Assurer bornes globales
+    if edges[0] > 0:
+        edges = np.concatenate([[0.0], edges])
+    if edges[-1] != np.inf:
+        edges = np.concatenate([edges, [np.inf]])
+    return edges
+
+
+def tranche_stats(df: pd.DataFrame, c_lim: str) -> pd.DataFrame:
+    grp = df.groupby("TrancheLimite", dropna=False).agg(
+        NbDossiers=(c_lim, "count"),
+        LimiteTotale=(c_lim, "sum"),
+        ConsommeTotal=("%s" % df.columns[df.columns.str.lower().str.contains("consomme")[0]], "sum") if any(df.columns.str.lower().str.contains("consomme")) else (c_lim, "sum"),
+        RatioCouverture_moy=("RatioCouverture", "mean"),
+        TauxUtilisation_moy=("TauxUtilisation", "mean"),
+    )
+    return grp.reset_index()
+
+def make_summary(df_if: pd.DataFrame, df_db: pd.DataFrame, df_km: pd.DataFrame, df_gmm: pd.DataFrame) -> pd.DataFrame:
+    n = len(df_if)
+    s = {
+        "Lignes": [n],
+        "IF_Anomalies_%": [100 * df_if["IF_is_anomaly"].mean() if n else np.nan],
+        "DBSCAN_Noise_%": [100 * df_db["DBSCAN_is_noise"].mean() if n else np.nan],
+        "KMeans_K": [df_km["KMeans_label"].nunique() if n else np.nan],
+        "GMM_K": [df_gmm["GMM_label"].nunique() if n else np.nan],
+        "Utilisation_Mediane": [df_if["TauxUtilisation"].median() if n else np.nan],
+        "Couverture_Mediane": [df_if["RatioCouverture"].median() if n else np.nan],
+    }
+    return pd.DataFrame(s)
+
+
+# ----------------------------- Main ----------------------------- #
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="4 algos sur base Limite/Consomme/Nantie (sans LGD/EAD)")
+    p.add_argument("--path", required=True)
+    p.add_argument("--filename", required=True)
+    p.add_argument("--sheet")
+
+    p.add_argument("--col-limite", required=True)
+    p.add_argument("--col-consomme", required=True)
+    p.add_argument("--col-nantie", required=True)
+
+    p.add_argument("--col-dossier")
+    p.add_argument("--col-intervenant")
+
+    p.add_argument("--contamination", type=float, default=0.05)
+    p.add_argument("--dbscan-eps", type=float, default=0.9)
+    p.add_argument("--dbscan-min-samples", type=int, default=10)
+    p.add_argument("--kmeans-k", type=int, default=4)
+    p.add_argument("--gmm-k", type=int, default=4)
+    p.add_argument("--random-state", type=int, default=42)
+
+    p.add_argument("--out-path")
+
+    # Binning des limites
+    p.add_argument("--bin-mode", choices=["auto", "quantile", "sturges", "scott", "fd", "business", "custom"], default="auto",
+                   help="Stratégie de tranches de limite")
+    p.add_argument("--bin-count", type=int, default=None, help="Nombre de tranches (si pertinent)")
+    p.add_argument("--quantiles", type=int, default=None, help="Nombre de quantiles pour bin-mode=quantile")
+    p.add_argument("--custom-bins", type=str, help="Bords custom séparés par des virgules, ex: 0,10000000,30000000,100000000,inf")
+
+    return p.parse_args()
+
+
+def write_output(base_input: str, out_path: str, features: pd.DataFrame, if_df: pd.DataFrame, db_df: pd.DataFrame, km_df: pd.DataFrame, gmm_df: pd.DataFrame, summary: pd.DataFrame, tranche_df: Optional[pd.DataFrame] = None) -> str:
+    os.makedirs(out_path, exist_ok=True)
+    base = os.path.splitext(os.path.basename(base_input))[0]
+    out_file = os.path.join(out_path, f"{base}_four_algos.xlsx")
+    with pd.ExcelWriter(out_file, engine="xlsxwriter") as xw:
+        features.to_excel(xw, sheet_name="Features", index=False)
+        if_df.to_excel(xw, sheet_name="IsolationForest", index=False)
+        db_df.to_excel(xw, sheet_name="DBSCAN", index=False)
+        km_df.to_excel(xw, sheet_name="KMeans", index=False)
+        gmm_df.to_excel(xw, sheet_name="GMM", index=False)
+        summary.to_excel(xw, sheet_name="Summary", index=False)
+        if tranche_df is not None:
+            tranche_df.to_excel(xw, sheet_name="ParTrancheLimite", index=False)
+    return out_file
+
+
+def main():
+    a = parse_args()
+    out_dir = a.out_path or a.path
+
+    df = read_table(a.path, a.filename, a.sheet)
+    check_columns(df, [a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"]])
+
+    feats = compute_features(df, a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"])
+
+    if_df = run_isolation_forest(feats, a.contamination, a.random_state)
+    db_df = run_dbscan(feats, a.dbscan_eps, a.dbscan_min_samples)
+    km_df = run_kmeans(feats, a.kmeans_k, a.random_state)
+    gmm_df = run_gmm(feats, a.gmm_k, a.random_state)
+
+    summary = make_summary(if_df, db_df, km_df, gmm_df)
+
+    # Binning autom./manuel des limites
+    edges = compute_limit_bins(
+        feats[a.__dict__["col_limite"]],
+        mode=a.bin_mode,
+        bin_count=a.bin_count,
+        quantiles=a.quantiles,
+        custom_bins=a.custom_bins,
+    )
+    # Labels lisibles
+    def edge_label(lo, hi):
+        lo_s = "0" if lo <= 0 else f"{int(lo):,}".replace(",", " ")
+        hi_s = "∞" if np.isinf(hi) else f"{int(hi):,}".replace(",", " ")
+        return f"{lo_s}–{hi_s}"
+
+    feats["TrancheLimite"] = pd.cut(pd.to_numeric(feats[a.__dict__["col_limite"]], errors="coerce"), bins=edges, include_lowest=True, right=False,
+                                     labels=[edge_label(edges[i], edges[i+1]) for i in range(len(edges)-1)])
+    par_tranche = tranche_stats(feats, a.__dict__["col_limite"]) 
+
+    out_file = write_output(a.filename, out_dir, feats, if_df, db_df, km_df, gmm_df, summary, par_tranche)
+
+    print("✅ Terminé. Fichier généré:", out_file)
+    print("Interprétation rapide:")
+    print("- IF_is_anomaly=True ou DBSCAN_label=-1 → points hors norme")
+    print("- KMeans_label / GMM_label → segments; comparez TauxUtilisation & RatioCouverture par segment")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"❌ Erreur: {e}", file=sys.stderr)
+        sys.exit(1)
+```
+
+
+Super idée — je viens d’ajouter au script dans le canvas :
+	• la répartition par tranches de limite avec détection automatique du nombre de tranches,
+	• un nouvel onglet ParTrancheLimite dans l’Excel de sortie, avec :
+		○ nb de dossiers,
+		○ limites & consommés totaux,
+		○ ratio de couverture moyen (nantie/consommé),
+		○ taux d’utilisation moyen (consommé/limite).
+Comment ça marche
+	• Par défaut --bin-mode auto : le script calcule k avec Sturges (≈ ceil(log2(n))+1, borné 3–10) puis crée k tranches par quantiles → équilibrées même si la distribution est très asymétrique.
+	• Tu peux choisir d’autres modes :
+		○ --bin-mode business → tranches [0, 10M, 30M, 100M, +∞),
+		○ --bin-mode quantile --quantiles 5 → quintiles,
+		○ --bin-mode sturges|scott|fd → règles classiques (largeur de classe),
+		○ --bin-mode custom --custom-bins "0,10000000,30000000,100000000,inf" → bords sur mesure.
+	• Labels lisibles du type “0–10 000 000”, “30 000 000–100 000 000”, “100 000 000–∞”.
+
+***
+
+A. Vues complémentaires (descriptives + ML)
+	1. Distribution par cluster
+		○ Répartir les tranches de limite dans chaque cluster → est-ce que les gros crédits se concentrent dans un cluster particulier ?
+		○ Heatmap (Cluster vs Tranche de limite).
+	2. Couverture vs Utilisation
+		○ Scatterplot (TauxUtilisation vs RatioCouverture), colorié par cluster (KMeans/GMM).
+		○ Les anomalies Isolation Forest/DBSCAN apparaîtront comme des points rouges.
+	3. Pareto du risque
+		○ Cumulé de Consommé vs Ratio de couverture.
+		○ Voir si 20% des dossiers concentrent 80% du “risque non couvert”.
+	4. Comparaison IF vs DBSCAN
+		○ Tableau croisé (points signalés anormaux par IF, DBSCAN, ou les deux).
+Permet de distinguer les anomalies “globales” (IF) vs “locales” (DBSCAN).
+
+
+```
+#!/usr/bin/env python3
+"""
+Risk ML + Reporting complet
+- 4 algos : IsolationForest, DBSCAN, KMeans, GMM
+- Binning (auto/quantile/sturges/scott/fd/business/custom) par Limite
+- Tableaux : ParTranche, ByCluster (KMeans & GMM), ByClusterTranche, IF_vs_DBSCAN, ConsensusRisk
+- Métriques de qualité : silhouette, inertia (KMeans), log-likelihood (GMM)
+- Stress test : -20% sur Nantie → ratios stressés et répartition par tranche
+
+Colonnes nécessaires (arguments) :
+  --col-limite    (Limite ou "Limote")
+  --col-consomme  (Tirage / Valeur consommée)
+  --col-nantie    (Valeur nantie)
+
+Exemple :
+  python risk_four_algos_plus_reporting.py \
+    --path "/chemin" --filename "donnees.xlsx" --sheet "Feuil1" \
+    --col-limite "LimiteCredit" --col-consomme "MontantConsomme" --col-nantie "ValeurNantie" \
+    --kmeans-k 4 --gmm-k 4 --dbscan-eps 0.8 --dbscan-min-samples 10 --bin-mode business
+"""
+
+import argparse
+import os
+import sys
+from typing import Optional, List, Dict
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import RobustScaler
+from sklearn.ensemble import IsolationForest
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score
+
+# ---------------------------- IO ---------------------------- #
+
+def read_table(path: str, filename: str, sheet: Optional[str]) -> pd.DataFrame:
+    fp = os.path.join(path, filename)
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f"Fichier introuvable: {fp}")
+    ext = os.path.splitext(filename.lower())[1]
+    if ext in {".xlsx", ".xlsm", ".xls"}:
+        return pd.read_excel(fp, sheet_name=sheet) if sheet else pd.read_excel(fp)
+    elif ext in {".csv", ".txt"}:
+        try:
+            return pd.read_csv(fp)
+        except UnicodeDecodeError:
+            return pd.read_csv(fp, encoding="latin-1", sep=None, engine="python")
+    else:
+        raise ValueError("Extension non supportée. Utilisez .xlsx/.xls/.csv/.txt")
+
+
+def check_columns(df: pd.DataFrame, cols: List[str]):
+    miss = [c for c in cols if c and c not in df.columns]
+    if miss:
+        raise KeyError(f"Colonnes manquantes: {miss}. Dispo: {list(df.columns)}")
+
+# ---------------------- Feature engineering ---------------------- #
+
+def compute_features(df: pd.DataFrame, c_lim: str, c_con: str, c_nan: str) -> pd.DataFrame:
+    out = df.copy()
+    for c in [c_lim, c_con, c_nan]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    out[c_lim] = out[c_lim].fillna(0)
+    out[c_con] = out[c_con].fillna(0)
+    out[c_nan] = out[c_nan].fillna(0)
+
+    # Combinaisons demandées
+    out["EcartLimite"] = (out[c_lim] - out[c_con])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out["RatioCouverture"] = (out[c_nan] / out[c_con]).replace([np.inf, -np.inf], np.nan)
+        out["TauxUtilisation"] = (out[c_con] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["Nantie_sur_Limite"] = (out[c_nan] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["EcartRelatif"] = ((out[c_lim] - out[c_con]) / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+    out["Gap_Nantie_Cons"] = out[c_con] - out[c_nan]
+
+    # Matrice d'entraînement (robust scaling)
+    feat_cols = [
+        "EcartLimite","RatioCouverture","TauxUtilisation","Nantie_sur_Limite","EcartRelatif","Gap_Nantie_Cons"
+    ]
+    X = out[feat_cols].copy()
+    for col in feat_cols:
+        X[col] = X[col].fillna(X[col].median())
+    scaler = RobustScaler()
+    Xs = scaler.fit_transform(X)
+    Xs = pd.DataFrame(Xs, columns=[f"scaled_{c}" for c in feat_cols], index=out.index)
+    return pd.concat([out, Xs], axis=1)
+
+# --------------------------- Binning --------------------------- #
+
+def compute_limit_bins(lim_series: pd.Series, mode: str = "auto", bin_count: Optional[int] = None,
+                        quantiles: Optional[int] = None, custom_bins: Optional[str] = None) -> np.ndarray:
+    s = pd.to_numeric(lim_series, errors="coerce").dropna()
+    n = len(s)
+    if n == 0:
+        return np.array([0.0, np.inf])
+
+    def sturges_bins():
+        k = int(np.ceil(np.log2(n))) + 1
+        return max(3, min(10, k))
+
+    if mode == "business":
+        return np.array([0.0, 10_000_000, 30_000_000, 100_000_000, np.inf], dtype=float)
+
+    if mode == "custom" and custom_bins:
+        edges = []
+        for tok in [t.strip() for t in custom_bins.split(",") if t.strip()]:
+            if tok.lower() in {"inf", "+inf", "infty", "infinite"}:
+                edges.append(np.inf)
+            else:
+                edges.append(float(tok))
+        edges = np.array(sorted(edges))
+        if edges[0] > 0:
+            edges = np.concatenate([[0.0], edges])
+        if edges[-1] != np.inf:
+            edges = np.concatenate([edges, [np.inf]])
+        return edges
+
+    if mode in {"auto", "quantile"}:
+        k = bin_count or quantiles or sturges_bins()
+        qs = np.linspace(0, 1, k + 1)
+        edges = np.unique(np.quantile(s, qs))
+        if edges[0] > 0:
+            edges = np.concatenate([[0.0], edges])
+        if edges[-1] != np.inf:
+            edges = np.concatenate([edges, [np.inf]])
+        return edges
+
+    x_min, x_max = float(s.min()), float(s.max())
+    if x_min == x_max:
+        return np.array([0.0, x_max, np.inf])
+
+    if mode == "sturges":
+        k = bin_count or (int(np.ceil(np.log2(n))) + 1)
+    elif mode == "scott":
+        h = 3.5 * float(np.std(s)) * (n ** (-1/3))
+        k = int(np.ceil((x_max - x_min) / max(h, 1e-9)))
+    elif mode == "fd":
+        iqr = float(np.subtract(*np.percentile(s, [75, 25])))
+        h = 2 * iqr * (n ** (-1/3))
+        k = int(np.ceil((x_max - x_min) / max(h, 1e-9)))
+    else:
+        k = sturges_bins()
+
+    k = int(max(3, min(20, k)))
+    edges = np.linspace(x_min, x_max, k + 1)
+    if edges[0] > 0:
+        edges = np.concatenate([[0.0], edges])
+    if edges[-1] != np.inf:
+        edges = np.concatenate([edges, [np.inf]])
+    return edges
+
+# --------------------------- Models --------------------------- #
+
+def run_isolation_forest(df: pd.DataFrame, contamination: float, random_state: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    model = IsolationForest(contamination=contamination, random_state=random_state)
+    labels = model.fit_predict(df[feats])  # -1 anomaly, 1 normal
+    scores = model.decision_function(df[feats])  # plus grand = plus normal
+    out = df.copy()
+    out["IF_label"] = labels
+    out["IF_is_anomaly"] = out["IF_label"].eq(-1)
+    out["IF_score"] = scores
+    return out
+
+
+def run_dbscan(df: pd.DataFrame, eps: float, min_samples: int) -> pd.DataFrame:
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    model = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = model.fit_predict(df[feats])
+    out = df.copy()
+    out["DBSCAN_label"] = labels  # -1 = bruit/anomalie
+    out["DBSCAN_is_noise"] = out["DBSCAN_label"].eq(-1)
+    return out
+
+
+def run_kmeans(df: pd.DataFrame, k: int, random_state: int):
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    km = KMeans(n_clusters=k, n_init=20, random_state=random_state)
+    labels = km.fit_predict(df[feats])
+    dists = km.transform(df[feats])
+    out = df.copy()
+    out["KMeans_label"] = labels
+    for i in range(k):
+        out[f"KMeans_dist_{i}"] = dists[:, i]
+    return out, km
+
+
+def run_gmm(df: pd.DataFrame, k: int, random_state: int):
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    gmm = GaussianMixture(n_components=k, n_init=5, random_state=random_state)
+    gmm.fit(df[feats])
+    labels = gmm.predict(df[feats])
+    probs = gmm.predict_proba(df[feats])
+    out = df.copy()
+    out["GMM_label"] = labels
+    for i in range(k):
+        out[f"GMM_prob_{i}"] = probs[:, i]
+    return out, gmm
+
+# --------------------------- Summaries --------------------------- #
+
+def portfolio_summary(df: pd.DataFrame) -> pd.DataFrame:
+    n = len(df)
+    return pd.DataFrame({
+        "Lignes": [n],
+        "Utilisation_Mediane": [df["TauxUtilisation"].median() if n else np.nan],
+        "Couverture_Mediane": [df["RatioCouverture"].median() if n else np.nan],
+        "DBSCAN_Noise_%": [100 * df.get("DBSCAN_is_noise", pd.Series(False)).mean() if n else np.nan],
+        "IF_Anomalies_%": [100 * df.get("IF_is_anomaly", pd.Series(False)).mean() if n else np.nan],
+    })
+
+
+def compute_cluster_quality(df_scaled: pd.DataFrame, label_col: str, model=None, model_name: str = "") -> dict:
+    X = df_scaled[[c for c in df_scaled.columns if c.startswith("scaled_")]].values
+    labels = df_scaled[label_col].values
+    metr = {"Model": model_name or label_col}
+    # silhouette (exclure bruit pour DBSCAN)
+    mask = labels != -1 if label_col == "DBSCAN_label" else np.ones_like(labels, dtype=bool)
+    if np.unique(labels[mask]).size >= 2 and mask.sum() >= 2:
+        try:
+            metr["Silhouette"] = float(silhouette_score(X[mask], labels[mask]))
+        except Exception:
+            metr["Silhouette"] = np.nan
+    else:
+        metr["Silhouette"] = np.nan
+    # spécifiques
+    if model_name.lower().startswith("kmeans") and hasattr(model, "inertia_"):
+        metr["Inertia"] = float(model.inertia_)
+    else:
+        metr["Inertia"] = np.nan
+    if model_name.lower().startswith("gmm") and hasattr(model, "score"):
+        try:
+            metr["LogLikelihood_total"] = float(model.score(X) * X.shape[0])
+        except Exception:
+            metr["LogLikelihood_total"] = np.nan
+    else:
+        metr["LogLikelihood_total"] = np.nan
+    metr["Clusters"] = int(np.unique(labels[labels != -1]).size)
+    return metr
+
+
+def by_cluster_stats(df: pd.DataFrame, label_col: str, c_lim: str) -> pd.DataFrame:
+    cons_cols = [c for c in df.columns if c.lower().startswith("montant") or "consomme" in c.lower()]
+    cons_col = cons_cols[0] if cons_cols else c_lim
+    agg = df.groupby(label_col).agg(
+        Nb=(c_lim, "count"),
+        LimiteTotale=(c_lim, "sum"),
+        ConsommeTotal=(cons_col, "sum"),
+        RatioCouverture_moy=("RatioCouverture", "mean"),
+        TauxUtilisation_moy=("TauxUtilisation", "mean"),
+    ).reset_index()
+    return agg
+
+
+def by_cluster_tranche(df: pd.DataFrame, label_col: str) -> pd.DataFrame:
+    agg = df.groupby([label_col, "TrancheLimite"], dropna=False).agg(
+        Nb=(label_col, "count"),
+        RatioCouverture_moy=("RatioCouverture", "mean"),
+        TauxUtilisation_moy=("TauxUtilisation", "mean"),
+    ).reset_index()
+    return agg
+
+
+def tranche_stats(df: pd.DataFrame, c_lim: str) -> pd.DataFrame:
+    cons_cols = [c for c in df.columns if c.lower().startswith("montant") or "consomme" in c.lower()]
+    cons_col = cons_cols[0] if cons_cols else c_lim
+    grp = df.groupby("TrancheLimite", dropna=False).agg(
+        NbDossiers=(c_lim, "count"),
+        LimiteTotale=(c_lim, "sum"),
+        ConsommeTotal=(cons_col, "sum"),
+        RatioCouverture_moy=("RatioCouverture", "mean"),
+        TauxUtilisation_moy=("TauxUtilisation", "mean"),
+    )
+    return grp.reset_index()
+
+
+def stress_test_coverage(df: pd.DataFrame, c_lim: str, c_con: str, c_nan: str, stress: float = -0.20) -> pd.DataFrame:
+    stressed = df.copy()
+    stressed["Nantie_stress"] = pd.to_numeric(stressed[c_nan], errors="coerce").fillna(0) * (1.0 + stress)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        stressed["RatioCouverture_stress"] = (stressed["Nantie_stress"] / pd.to_numeric(stressed[c_con], errors="coerce")).replace([np.inf, -np.inf], np.nan)
+    return stressed
+
+# ----------------------------- Write ----------------------------- #
+
+def write_output(base_input: str, out_path: str, **dfs) -> str:
+    os.makedirs(out_path, exist_ok=True)
+    base = os.path.splitext(os.path.basename(base_input))[0]
+    out_file = os.path.join(out_path, f"{base}_four_algos_full.xlsx")
+    with pd.ExcelWriter(out_file, engine="xlsxwriter") as xw:
+        for name, d in dfs.items():
+            if d is not None:
+                d.to_excel(xw, sheet_name=name[:31], index=False if not isinstance(d, pd.Series) else True)
+    return out_file
+
+# ----------------------------- Main ----------------------------- #
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="4 algos + reporting complet sur Limite/Consomme/Nantie")
+    p.add_argument("--path", required=True)
+    p.add_argument("--filename", required=True)
+    p.add_argument("--sheet")
+
+    p.add_argument("--col-limite", required=True)
+    p.add_argument("--col-consomme", required=True)
+    p.add_argument("--col-nantie", required=True)
+
+    p.add_argument("--contamination", type=float, default=0.05)
+    p.add_argument("--dbscan-eps", type=float, default=0.9)
+    p.add_argument("--dbscan-min-samples", type=int, default=10)
+    p.add_argument("--kmeans-k", type=int, default=4)
+    p.add_argument("--gmm-k", type=int, default=4)
+    p.add_argument("--random-state", type=int, default=42)
+
+    p.add_argument("--out-path")
+
+    p.add_argument("--bin-mode", choices=["auto", "quantile", "sturges", "scott", "fd", "business", "custom"], default="auto")
+    p.add_argument("--bin-count", type=int, default=None)
+    p.add_argument("--quantiles", type=int, default=None)
+    p.add_argument("--custom-bins", type=str)
+
+    return p.parse_args()
+
+
+def main():
+    a = parse_args()
+    out_dir = a.out_path or a.path
+
+    # Lecture & features
+    df = read_table(a.path, a.filename, a.sheet)
+    check_columns(df, [a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"]])
+    feats = compute_features(df, a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"])
+
+    # Binning limites
+    edges = compute_limit_bins(
+        feats[a.__dict__["col_limite"]],
+        mode=a.bin_mode,
+        bin_count=a.bin_count,
+        quantiles=a.quantiles,
+        custom_bins=a.custom_bins,
+    )
+    def edge_label(lo, hi):
+        lo_s = "0" if lo <= 0 else f"{int(lo):,}".replace(",", " ")
+        hi_s = "∞" if np.isinf(hi) else f"{int(hi):,}".replace(",", " ")
+        return f"{lo_s}–{hi_s}"
+    feats["TrancheLimite"] = pd.cut(pd.to_numeric(feats[a.__dict__["col_limite"]], errors="coerce"), bins=edges, include_lowest=True, right=False,
+                                     labels=[edge_label(edges[i], edges[i+1]) for i in range(len(edges)-1)])
+
+    # Modèles
+    if_res = run_isolation_forest(feats, a.contamination, a.random_state)
+    db_res = run_dbscan(feats, a.dbscan_eps, a.dbscan_min_samples)
+    km_res, km_model = run_kmeans(feats, a.kmeans_k, a.random_state)
+    gmm_res, gmm_model = run_gmm(feats, a.gmm_k, a.random_state)
+
+    # Résumés
+    summary = portfolio_summary(if_res)
+
+    # Qualité clusters
+    qual_rows = [
+        compute_cluster_quality(km_res, "KMeans_label", km_model, model_name=f"KMeans(k={a.kmeans_k})"),
+        compute_cluster_quality(gmm_res, "GMM_label", gmm_model, model_name=f"GMM(k={a.gmm_k})"),
+        compute_cluster_quality(db_res, "DBSCAN_label", None, model_name="DBSCAN"),
+    ]
+    cluster_quality = pd.DataFrame(qual_rows)
+
+    # Par tranche / par cluster
+    par_tranche = tranche_stats(feats, a.__dict__["col_limite"])
+    bycl_km = by_cluster_stats(km_res, "KMeans_label", a.__dict__["col_limite"])
+    bycltr_km = by_cluster_tranche(km_res, "KMeans_label")
+    bycl_gmm = by_cluster_stats(gmm_res, "GMM_label", a.__dict__["col_limite"])
+    bycltr_gmm = by_cluster_tranche(gmm_res, "GMM_label")
+
+    # Consensus & crosstab IF/DBSCAN
+    consensus = feats[[a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"], "RatioCouverture", "TauxUtilisation", "TrancheLimite"]].copy()
+    consensus["IF_is_anomaly"] = (if_res["IF_is_anomaly"]).values
+    consensus["DBSCAN_is_noise"] = (db_res["DBSCAN_is_noise"]).values
+    consensus["ConsensusRisk"] = consensus["IF_is_anomaly"] | consensus["DBSCAN_is_noise"]
+    crosstab = pd.crosstab(consensus["IF_is_anomaly"], consensus["DBSCAN_is_noise"], rownames=["IF"], colnames=["DBSCAN"], dropna=False).reset_index()
+
+    # Stress test -20% sur garanties
+    stressed = stress_test_coverage(feats, a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"], stress=-0.20)
+    stress_bytranche = tranche_stats(stressed.rename(columns={"RatioCouverture_stress":"RatioCouverture"}), a.__dict__["col_limite"])  # réutilise la fonction
+
+    # Ecriture
+    out_file = write_output(
+        a.filename, out_dir,
+        Features=feats,
+        IsolationForest=if_res,
+        DBSCAN=db_res,
+        KMeans=km_res,
+        GMM=gmm_res,
+        Summary=summary,
+        ClusterMetrics=cluster_quality,
+        ParTrancheLimite=par_tranche,
+        ByCluster_KMeans=bycl_km,
+        ByClusterTranche_KMeans=bycltr_km,
+        ByCluster_GMM=bycl_gmm,
+        ByClusterTranche_GMM=bycltr_gmm,
+        ConsensusRisk=consensus,
+        IF_vs_DBSCAN=crosstab,
+        Stress_ParTranche=stress_bytranche,
+    )
+
+    print("✅ Terminé. Fichier généré:", out_file)
+    print("Interprétation rapide:")
+    print("- IF_is_anomaly=True / DBSCAN_label=-1 → points hors norme")
+    print("- KMeans/GMM: comparez RatioCouverture & TauxUtilisation par cluster et tranche")
+    print("- ClusterMetrics: silhouette (plus haut=meilleur), inertia (plus bas=meilleur), log-likelihood (GMM, plus haut=meilleur)")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"❌ Erreur: {e}", file=sys.stderr)
+        sys.exit(1)
+
+```
+
+
+
+
+```
+#!/usr/bin/env python3
+"""
+DBSCAN Grid-Scan (à part)
+- Lit le même fichier (Excel/CSV) que tes autres scripts
+- Calcule les mêmes features minimales (sans LGD/EAD)
+- Balaye plusieurs couples (eps, min_samples)
+- Produit un Excel <nom>_dbscan_scan.xlsx avec :
+    * Summary : par (eps, min_samples) → nb clusters (hors -1), % bruit, nb points
+    * Details : pour chaque combo & cluster (≠ -1) → n, médiane Limite / Utilisation / Couverture
+    * BestPick : proposition(s) de combos intéressants (beaucoup de clusters, bruit modéré)
+
+Exemples :
+  python risk_dbscan_scan.py \
+    --path "/chemin" --filename "donnees.xlsx" --sheet "Feuil1" \
+    --col-limite "LimiteCredit" --col-consomme "MontantConsomme" --col-nantie "ValeurNantie" \
+    --eps-grid "0.5,0.7,0.9,1.1" --min-samples-grid "6,8,10" --noise-max 60
+
+  # Rapide, garde tes valeurs par défaut et scanne seulement eps
+  python risk_dbscan_scan.py --path . --filename data.csv \
+    --col-limite Limite --col-consomme Consomme --col-nantie Nantie \
+    --eps-grid "0.6,0.8,1.0"
+"""
+
+import argparse
+import os
+import sys
+from typing import Optional, List, Tuple
+
+import numpy as np
+import pandas as pd
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import RobustScaler
+
+# ---------------------------- IO ---------------------------- #
+
+def read_table(path: str, filename: str, sheet: Optional[str]) -> pd.DataFrame:
+    fp = os.path.join(path, filename)
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f"Fichier introuvable: {fp}")
+    ext = os.path.splitext(filename.lower())[1]
+    if ext in {".xlsx", ".xlsm", ".xls"}:
+        return pd.read_excel(fp, sheet_name=sheet) if sheet else pd.read_excel(fp)
+    elif ext in {".csv", ".txt"}:
+        try:
+            return pd.read_csv(fp)
+        except UnicodeDecodeError:
+            return pd.read_csv(fp, encoding="latin-1", sep=None, engine="python")
+    else:
+        raise ValueError("Extension non supportée. Utilisez .xlsx/.xls/.csv/.txt")
+
+# ---------------------- Features (mêmes que script minimal) ---------------------- #
+
+def compute_features(df: pd.DataFrame, c_lim: str, c_con: str, c_nan: str) -> pd.DataFrame:
+    out = df.copy()
+    for c in [c_lim, c_con, c_nan]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    out[c_lim] = out[c_lim].fillna(0)
+    out[c_con] = out[c_con].fillna(0)
+    out[c_nan] = out[c_nan].fillna(0)
+
+    out["EcartLimite"] = (out[c_lim] - out[c_con])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out["RatioCouverture"] = (out[c_nan] / out[c_con]).replace([np.inf, -np.inf], np.nan)
+        out["TauxUtilisation"] = (out[c_con] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["Nantie_sur_Limite"] = (out[c_nan] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["EcartRelatif"] = ((out[c_lim] - out[c_con]) / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+    out["Gap_Nantie_Cons"] = out[c_con] - out[c_nan]
+
+    feat_cols = [
+        "EcartLimite","RatioCouverture","TauxUtilisation","Nantie_sur_Limite","EcartRelatif","Gap_Nantie_Cons"
+    ]
+    X = out[feat_cols].copy()
+    for col in feat_cols:
+        X[col] = X[col].fillna(X[col].median())
+
+    scaler = RobustScaler()
+    Xs = scaler.fit_transform(X)
+    Xs = pd.DataFrame(Xs, columns=[f"scaled_{c}" for c in feat_cols], index=out.index)
+    return pd.concat([out, Xs], axis=1)
+
+# ---------------------- DBSCAN Grid Scan ---------------------- #
+
+def run_dbscan_labels(X: np.ndarray, eps: float, min_samples: int) -> np.ndarray:
+    model = DBSCAN(eps=eps, min_samples=min_samples)
+    return model.fit_predict(X)
+
+
+def summarize_combo(df: pd.DataFrame, labels: np.ndarray, c_lim: str) -> Tuple[dict, pd.DataFrame]:
+    n_points = labels.size
+    noise_pct = float((labels == -1).mean() * 100.0)
+    n_clusters = int(np.unique(labels[labels != -1]).size)
+    summ = {
+        "n_points": n_points,
+        "n_clusters": n_clusters,
+        "noise_%": noise_pct,
+    }
+    # Détails par cluster (≠ -1)
+    valid = labels != -1
+    if not valid.any():
+        return summ, pd.DataFrame(columns=["cluster","n","Limite_med","Utilisation_med","Couverture_med"])  
+    lab_series = pd.Series(labels[valid], index=df.index[valid], name="cluster")
+    tmp = pd.concat([df.loc[valid, [c_lim, "TauxUtilisation", "RatioCouverture"]], lab_series], axis=1)
+    stats = tmp.groupby("cluster").agg(
+        n=("cluster", "count"),
+        Limite_med=(c_lim, "median"),
+        Utilisation_med=("TauxUtilisation", "median"),
+        Couverture_med=("RatioCouverture", "median"),
+    ).reset_index()
+    return summ, stats
+
+
+def grid_scan_dbscan(df: pd.DataFrame, eps_list: List[float], ms_list: List[int], c_lim: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+    feats = [c for c in df.columns if c.startswith("scaled_")]
+    X = df[feats].values
+    summary_rows = []
+    detail_frames = []
+    for eps in eps_list:
+        for ms in ms_list:
+            labels = run_dbscan_labels(X, float(eps), int(ms))
+            summ, stats = summarize_combo(df, labels, c_lim)
+            summ.update({"eps": float(eps), "min_samples": int(ms)})
+            summary_rows.append(summ)
+            if not stats.empty:
+                stats.insert(0, "min_samples", int(ms))
+                stats.insert(0, "eps", float(eps))
+                detail_frames.append(stats)
+    summary_df = pd.DataFrame(summary_rows).sort_values(["eps", "min_samples"]).reset_index(drop=True)
+    details_df = pd.concat(detail_frames, ignore_index=True) if detail_frames else pd.DataFrame()
+
+    # Best pick: max clusters sous contrainte de bruit <= noise_max (choisie plus tard)
+    best_df = summary_df.copy()
+    return summary_df, details_df, best_df
+
+# ---------------------- Output ---------------------- #
+
+def write_output(base_input: str, out_path: str, summary: pd.DataFrame, details: pd.DataFrame, best: pd.DataFrame) -> str:
+    os.makedirs(out_path, exist_ok=True)
+    base = os.path.splitext(os.path.basename(base_input))[0]
+    out_file = os.path.join(out_path, f"{base}_dbscan_scan.xlsx")
+    with pd.ExcelWriter(out_file, engine="xlsxwriter") as xw:
+        summary.to_excel(xw, sheet_name="Summary", index=False)
+        details.to_excel(xw, sheet_name="Details", index=False)
+        best.to_excel(xw, sheet_name="BestPick", index=False)
+    return out_file
+
+# ---------------------- CLI ---------------------- #
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="DBSCAN grid-scan sur Limite/Consomme/Nantie (features minimales)")
+    p.add_argument("--path", required=True)
+    p.add_argument("--filename", required=True)
+    p.add_argument("--sheet")
+
+    p.add_argument("--col-limite", required=True)
+    p.add_argument("--col-consomme", required=True)
+    p.add_argument("--col-nantie", required=True)
+
+    p.add_argument("--eps-grid", type=str, default="0.5,0.7,0.9,1.1")
+    p.add_argument("--min-samples-grid", type=str, default=None)
+
+    p.add_argument("--min-samples", type=int, default=10, help="min_samples par défaut si --min-samples-grid est omis")
+    p.add_argument("--noise-max", type=float, default=60.0, help="Seuil max de bruit (%) pour la recommandation BestPick")
+
+    p.add_argument("--out-path")
+    return p.parse_args()
+
+# ---------------------- Main ---------------------- #
+
+def main():
+    a = parse_args()
+    out_dir = a.out_path or a.path
+
+    df = read_table(a.path, a.filename, a.sheet)
+    # Compute features
+    feats = compute_features(df, a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"]) 
+
+    # Parse grids
+    eps_list = [float(x.strip()) for x in a.eps_grid.split(',') if x.strip()]
+    if a.min_samples_grid:
+        ms_list = [int(x.strip()) for x in a.min_samples_grid.split(',') if x.strip()]
+    else:
+        ms_list = [a.min_samples]
+
+    summary_df, details_df, best_df = grid_scan_dbscan(feats, eps_list, ms_list, a.__dict__["col_limite"])
+
+    # Best pick: choisir combos avec bruit <= noise_max et max n_clusters, puis eps le plus petit
+    cand = summary_df[summary_df["noise_%"] <= a.noise_max]
+    if not cand.empty:
+        mx = cand["n_clusters"].max()
+        best_df = cand[cand["n_clusters"] == mx].sort_values(["eps", "min_samples"]).reset_index(drop=True)
+    else:
+        best_df = summary_df.sort_values(["noise_%", "n_clusters"], ascending=[True, False]).head(5)
+
+    out_file = write_output(a.filename, out_dir, summary_df, details_df, best_df)
+
+    print("✅ DBSCAN grid-scan terminé. Fichier généré:", out_file)
+    print("Conseil: cherchez des lignes avec n_clusters élevé et noise_% modéré; consultez Details pour les médianes par cluster.")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"❌ Erreur: {e}", file=sys.stderr)
+        sys.exit(1)
+
+```
+
+
+
+
+Ce que fait ce script dédié
+	• Reprend exactement tes features minimales (Limite, Consommé, Nantie + ratios) sans LGD/EAD.
+	• Balaye une grille DBSCAN de valeurs eps et min_samples.
+	• Produit un Excel nom_dbscan_scan.xlsx avec :
+		○ Summary : pour chaque (eps, min_samples) → n_clusters (hors -1), % bruit, n_points.
+		○ Details : pour chaque combo & cluster identifié (≠ -1) → n, médianes Limite, TauxUtilisation, **RatioCouverture
+BestPick : recommandation auto (max clusters avec bruit ≤ noise_max, puis plus petit eps).
+
+```
+#!/usr/bin/env python3
+"""
+Segmentation économique (à part) — KMeans & GMM
+
+Objectif : segmenter les dossiers sur la base de 3 variables métier :
+  - Limite (montant de la limite)
+  - Taux d'utilisation = Consommé / Limite
+  - Ratio de couverture = Nantie / Consommé
+
+Sorties (Excel <nom>_segmentation.xlsx) :
+  - Features : données + 3 features utilisées (avec version scalée)
+  - KMeans : label, distances aux centres, centres (échelle d'origine)
+  - GMM : label, probabilités par cluster, moyennes (échelle d'origine)
+  - ClusterProfiles_* : profils par cluster (médians Limite / Utilisation / Couverture, effectifs, poids économiques)
+  - SuggestedLabels : étiquettes métier proposées (ex. "Petits tickets bien sécurisés", etc.)
+  - If Auto-K : ModelSelection_* (silhouette KMeans, BIC GMM)
+
+Exemples :
+  python risk_segmentation_kmeans_gmm.py \
+    --path "/chemin" --filename "donnees.xlsx" --sheet "Feuil1" \
+    --col-limite "LimiteCredit" --col-consomme "MontantConsomme" --col-nantie "ValeurNantie" \
+    --kmeans-k 3 --gmm-k 3
+
+  # Sélection auto du nombre de clusters
+  python risk_segmentation_kmeans_gmm.py \
+    --path . --filename data.csv \
+    --col-limite Limite --col-consomme Consomme --col-nantie Nantie \
+    --auto-k --kmin 2 --kmax 6
+"""
+
+import argparse
+import os
+import sys
+from typing import Optional, List, Tuple, Dict
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import RobustScaler
+from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score
+
+# ---------------------------- IO ---------------------------- #
+
+def read_table(path: str, filename: str, sheet: Optional[str]) -> pd.DataFrame:
+    fp = os.path.join(path, filename)
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f"Fichier introuvable: {fp}")
+    ext = os.path.splitext(filename.lower())[1]
+    if ext in {".xlsx", ".xlsm", ".xls"}:
+        return pd.read_excel(fp, sheet_name=sheet) if sheet else pd.read_excel(fp)
+    elif ext in {".csv", ".txt"}:
+        try:
+            return pd.read_csv(fp)
+        except UnicodeDecodeError:
+            return pd.read_csv(fp, encoding="latin-1", sep=None, engine="python")
+    else:
+        raise ValueError("Extension non supportée. Utilisez .xlsx/.xls/.csv/.txt")
+
+# ---------------------- Features ---------------------- #
+
+def compute_features(df: pd.DataFrame, c_lim: str, c_con: str, c_nan: str) -> pd.DataFrame:
+    out = df.copy()
+    # Nettoyage
+    for c in [c_lim, c_con, c_nan]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    out[c_lim] = out[c_lim].fillna(0)
+    out[c_con] = out[c_con].fillna(0)
+    out[c_nan] = out[c_nan].fillna(0)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out["TauxUtilisation"] = (out[c_con] / out[c_lim]).replace([np.inf, -np.inf], np.nan)
+        out["RatioCouverture"] = (out[c_nan] / out[c_con]).replace([np.inf, -np.inf], np.nan)
+
+    # Remplacer NaN par médianes robustes
+    for col in ["TauxUtilisation", "RatioCouverture"]:
+        out[col] = out[col].fillna(out[col].median())
+
+    # Matrix & scaling
+    feat_cols = [c_lim, "TauxUtilisation", "RatioCouverture"]
+    X = out[feat_cols].copy()
+    scaler = RobustScaler()
+    Xs = scaler.fit_transform(X)
+    Xs = pd.DataFrame(Xs, columns=[f"scaled_{i}" for i in ["Limite","TauxUtilisation","RatioCouverture"]], index=out.index)
+
+    # Garder scaler & cols pour inverses
+    out = pd.concat([out, Xs], axis=1)
+    out.attrs["_scaler_center"] = getattr(scaler, "center_", getattr(scaler, "center", None))
+    out.attrs["_scaler_scale"] = getattr(scaler, "scale_", None)
+    out.attrs["_feat_cols"] = feat_cols
+    out.attrs["_scaler_obj"] = scaler
+    return out
+
+# ---------------------- Helpers ---------------------- #
+
+def inverse_transform_centers(centers_scaled: np.ndarray, scaler: RobustScaler, feat_cols: List[str]) -> pd.DataFrame:
+    centers = scaler.inverse_transform(centers_scaled)
+    return pd.DataFrame(centers, columns=feat_cols)
+
+
+def kmeans_with_k(Xs: np.ndarray, k: int, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, KMeans, float]:
+    km = KMeans(n_clusters=k, n_init=20, random_state=random_state)
+    labels = km.fit_predict(Xs)
+    centers_scaled = km.cluster_centers_
+    sil = np.nan
+    if len(np.unique(labels)) > 1:
+        try:
+            sil = silhouette_score(Xs, labels)
+        except Exception:
+            sil = np.nan
+    return labels, centers_scaled, km, sil
+
+
+def gmm_with_k(Xs: np.ndarray, k: int, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, GaussianMixture, float]:
+    gmm = GaussianMixture(n_components=k, n_init=5, random_state=random_state)
+    gmm.fit(Xs)
+    labels = gmm.predict(Xs)
+    probs = gmm.predict_proba(Xs)
+    bic = gmm.bic(Xs)
+    return labels, probs, gmm, bic
+
+
+def auto_select_k_kmeans(Xs: np.ndarray, kmin: int, kmax: int, random_state: int = 42) -> Tuple[int, pd.DataFrame]:
+    rows = []
+    for k in range(kmin, kmax + 1):
+        labels, centers_scaled, km, sil = kmeans_with_k(Xs, k, random_state)
+        rows.append({"k": k, "silhouette": sil})
+    ms = pd.DataFrame(rows).sort_values("k").reset_index(drop=True)
+    best_k = int(ms.loc[ms["silhouette"].idxmax(), "k"]) if ms["silhouette"].notna().any() else kmin
+    return best_k, ms
+
+
+def auto_select_k_gmm(Xs: np.ndarray, kmin: int, kmax: int, random_state: int = 42) -> Tuple[int, pd.DataFrame]:
+    rows = []
+    for k in range(kmin, kmax + 1):
+        labels, probs, gmm, bic = gmm_with_k(Xs, k, random_state)
+        rows.append({"k": k, "BIC": bic})
+    ms = pd.DataFrame(rows).sort_values("k").reset_index(drop=True)
+    best_k = int(ms.loc[ms["BIC"].idxmin(), "k"]) if ms["BIC"].notna().any() else kmin
+    return best_k, ms
+
+
+def cluster_profiles(df: pd.DataFrame, label_col: str, c_lim: str) -> pd.DataFrame:
+    # Poids économiques
+    cons_cols = [c for c in df.columns if c.lower().startswith("montant") or "consomme" in c.lower()]
+    cons_col = cons_cols[0] if cons_cols else c_lim
+    prof = df.groupby(label_col).agg(
+        n=(label_col, "count"),
+        Limite_med=(c_lim, "median"),
+        Utilisation_med=("TauxUtilisation", "median"),
+        Couverture_med=("RatioCouverture", "median"),
+        Limite_total=(c_lim, "sum"),
+        Consomme_total=(cons_col, "sum"),
+    ).reset_index()
+    # Parts
+    total_lim = prof["Limite_total"].sum()
+    total_con = prof["Consomme_total"].sum()
+    prof["Part_Limite_%"] = 100 * prof["Limite_total"] / total_lim if total_lim > 0 else np.nan
+    prof["Part_Consomme_%"] = 100 * prof["Consomme_total"] / total_con if total_con > 0 else np.nan
+    return prof
+
+
+def suggest_labels(prof: pd.DataFrame, c_lim: str) -> pd.DataFrame:
+    # Heuristiques simples basées sur rangs de médianes
+    prof = prof.copy()
+    # Rang par taille de limite
+    prof["rank_lim"] = prof["Limite_med"].rank(method="dense")
+    max_rank = prof["rank_lim"].max()
+    labels = []
+    for _, r in prof.iterrows():
+        big = r["rank_lim"] == max_rank
+        high_cov = r["Couverture_med"] >= 1.0
+        low_use = r["Utilisation_med"] <= 0.3
+        if (not big) and high_cov:
+            labels.append("Petits tickets bien sécurisés")
+        elif big and (r["Couverture_med"] < 1.0):
+            labels.append("Gros tickets faiblement couverts")
+        elif big and low_use:
+            labels.append("Limites importantes mais peu utilisées")
+        else:
+            labels.append("Profil intermédiaire")
+    prof["LabelSuggere"] = labels
+    return prof[[prof.columns[0], "LabelSuggere"]]
+
+# ---------------------- Write ---------------------- #
+
+def write_output(base_input: str, out_path: str, **dfs) -> str:
+    os.makedirs(out_path, exist_ok=True)
+    base = os.path.splitext(os.path.basename(base_input))[0]
+    out_file = os.path.join(out_path, f"{base}_segmentation.xlsx")
+    with pd.ExcelWriter(out_file, engine="xlsxwriter") as xw:
+        for name, d in dfs.items():
+            if d is not None and not (isinstance(d, pd.DataFrame) and d.empty):
+                d.to_excel(xw, sheet_name=name[:31], index=False)
+    return out_file
+
+# ---------------------- CLI ---------------------- #
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Segmentation économique KMeans/GMM sur (Limite, Utilisation, Couverture)")
+    p.add_argument("--path", required=True)
+    p.add_argument("--filename", required=True)
+    p.add_argument("--sheet")
+
+    p.add_argument("--col-limite", required=True)
+    p.add_argument("--col-consomme", required=True)
+    p.add_argument("--col-nantie", required=True)
+
+    p.add_argument("--kmeans-k", type=int, default=3)
+    p.add_argument("--gmm-k", type=int, default=3)
+    p.add_argument("--auto-k", action="store_true")
+    p.add_argument("--kmin", type=int, default=2)
+    p.add_argument("--kmax", type=int, default=6)
+    p.add_argument("--random-state", type=int, default=42)
+
+    p.add_argument("--out-path")
+    return p.parse_args()
+
+# ---------------------- Main ---------------------- #
+
+def main():
+    a = parse_args()
+    out_dir = a.out_path or a.path
+
+    # 1) Lecture & features
+    df = read_table(a.path, a.filename, a.sheet)
+    feats = compute_features(df, a.__dict__["col_limite"], a.__dict__["col_consomme"], a.__dict__["col_nantie"])
+
+    # 2) Design matrix
+    Xs = feats[[c for c in feats.columns if c.startswith("scaled_")]].values
+    scaler = feats.attrs.get("_scaler_obj")
+    feat_cols = feats.attrs.get("_feat_cols")
+
+    # 3) Sélection de k si demandé
+    km_k = a.kmeans_k
+    gmm_k = a.gmm_k
+    ms_kmeans = None
+    ms_gmm = None
+    if a.auto_k:
+        km_k, ms_kmeans = auto_select_k_kmeans(Xs, a.kmin, a.kmax, a.random_state)
+        gmm_k, ms_gmm = auto_select_k_gmm(Xs, a.kmin, a.kmax, a.random_state)
+
+    # 4) KMeans
+    km = KMeans(n_clusters=km_k, n_init=20, random_state=a.random_state)
+    km_labels = km.fit_predict(Xs)
+    km_centers_scaled = km.cluster_centers_
+    km_centers = inverse_transform_centers(km_centers_scaled, scaler, feat_cols)
+    km_out = feats.copy()
+    km_out["KMeans_label"] = km_labels
+    for i in range(km_k):
+        km_out[f"KMeans_dist_{i}"] = ((Xs - km_centers_scaled[i])**2).sum(axis=1) ** 0.5
+
+    # 5) GMM
+    gmm = GaussianMixture(n_components=gmm_k, n_init=5, random_state=a.random_state)
+    gmm.fit(Xs)
+    gmm_labels = gmm.predict(Xs)
+    gmm_probs = gmm.predict_proba(Xs)
+    gmm_means_scaled = gmm.means_
+    gmm_means = inverse_transform_centers(gmm_means_scaled, scaler, feat_cols)
+    gmm_out = feats.copy()
+    gmm_out["GMM_label"] = gmm_labels
+    for i in range(gmm_k):
+        gmm_out[f"GMM_prob_{i}"] = gmm_probs[:, i]
+
+    # 6) Profils & labels suggérés
+    prof_km = cluster_profiles(km_out, "KMeans_label", a.__dict__["col_limite"])
+    prof_gmm = cluster_profiles(gmm_out, "GMM_label", a.__dict__["col_limite"])
+    lab_km = suggest_labels(prof_km, a.__dict__["col_limite"]) if km_k >= 2 else pd.DataFrame()
+    lab_gmm = suggest_labels(prof_gmm, a.__dict__["col_limite"]) if gmm_k >= 2 else pd.DataFrame()
+
+    # 7) Model selection tables si auto-k
+    ms_kmeans_df = ms_kmeans if ms_kmeans is not None else pd.DataFrame()
+    ms_gmm_df = ms_gmm if ms_gmm is not None else pd.DataFrame()
+
+    # 8) Ecriture
+    out_file = write_output(
+        a.filename, out_dir,
+        Features=feats[[a.__dict__["col_limite"], "TauxUtilisation", "RatioCouverture"]],
+        KMeans=km_out[[a.__dict__["col_limite"], "TauxUtilisation", "RatioCouverture", "KMeans_label"] + [c for c in km_out.columns if c.startswith("KMeans_dist_")]],
+        KMeans_Centers=km_centers,
+        GMM=gmm_out[[a.__dict__["col_limite"], "TauxUtilisation", "RatioCouverture", "GMM_label"] + [c for c in gmm_out.columns if c.startswith("GMM_prob_")]],
+        GMM_Means=gmm_means,
+        ClusterProfiles_KMeans=prof_km,
+        ClusterProfiles_GMM=prof_gmm,
+        SuggestedLabels_KMeans=lab_km,
+        SuggestedLabels_GMM=lab_gmm,
+        ModelSelection_KMeans=ms_kmeans_df,
+        ModelSelection_GMM=ms_gmm_df,
+    )
+
+    print("✅ Terminé. Fichier généré:", out_file)
+    if a.auto_k:
+        print(f"(Auto-k) KMeans k*={km_k} (max silhouette), GMM k*={gmm_k} (min BIC)")
+    print("Interprétation: utilisez ClusterProfiles_* et SuggestedLabels_* pour relire les segments en termes métiers.")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"❌ Erreur: {e}", file=sys.stderr)
+        sys.exit(1)
+```
+
+Ce qu’il fait :
+	• lit ton Excel/CSV,
+	• calcule TauxUtilisation = Consommé/Limite et RatioCouverture = Nantie/Consommé,
+	• lance KMeans et GMM sur (Limite, TauxUtilisation, RatioCouverture),
+	• exporte un Excel <nom>_segmentation.xlsx avec :
+		○ Features,
+		○ KMeans (+ distances) et KMeans_Centers (centres sur l’échelle d’origine),
+		○ GMM (+ probabilités) et GMM_Means (moyennes sur l’échelle d’origine),
+		○ ClusterProfiles_* (médianes + poids économiques),
+		○ SuggestedLabels_* — une étiquette métier suggérée par cluster :
+			§ Petits tickets bien sécurisés,
+			§ Gros tickets faiblement couverts,
+			§ Limites importantes mais peu utilisées,
+			§ ou Profil intermédiaire (si aucun cas typique).
+(optionnel) ModelSelection_* si auto-k activé.
