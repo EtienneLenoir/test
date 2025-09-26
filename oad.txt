@@ -1,0 +1,543 @@
+Option Explicit
+
+' =======================
+' =   Public API       =
+' =======================
+
+Public Enum DataProvider
+    dpBloomberg = 1
+    dpWorkspace = 2  ' LSEG Workspace
+End Enum
+
+' Seuil auto pour choisir IN-list vs table tampon + JOIN
+Private Const ISIN_INLIST_THRESHOLD As Long = 800
+
+' Résout une liste d’ISIN en un SEUL tableau 2D: [n x 3] => (ISIN, BloombergTicker, Ric)
+' - isins: Variant (array dynamique 1D), e.g. Array("FR0000131104","US0378331005")
+' - provider: dpBloomberg ou dpWorkspace (détermine quel identifiant est exigé côté résultat)
+' Retour: Variant(0 To n-1, 0 To 2) -> colonnes: 0=ISIN, 1=BloombergTicker, 2=Ric
+Public Function ResolveInstruments(ByVal isins As Variant, ByVal provider As DataProvider) As Variant
+    Dim t0 As Double: t0 = Timer
+    
+    EnsureSchemaFast
+    
+    Dim arr() As String
+    arr = NormalizeIsinArray(isins)
+    If UBound(arr) < 0 Then
+        ResolveInstruments = Empty
+        Exit Function
+    End If
+    
+    ' 1) Charger ce qu’on a déjà en base (en un seul hit) — adaptatif
+    Dim dict As Object ' Scripting.Dictionary: key ISIN -> Array(Bbg, Ric)
+    Set dict = LoadExistingToDictAdaptive(arr)
+    
+    ' 2) Séparer ce qui manque selon provider
+    Dim missing() As String
+    missing = ComputeMissing(arr, dict, provider)
+    
+    ' 3) Appeler l’API pour les manquants (batch) -> hooks à implémenter (stubs fournis plus bas)
+    If UBound(missing) >= 0 Then
+        Dim fetched As Variant ' 2D: rows of (Isin, BloombergTicker, Ric)
+        fetched = BatchFetchFromProvider(missing, provider)
+        
+        ' Hydrater le dico avec les nouveaux (sans écraser l’existant)
+        If Not IsEmpty(fetched) Then
+            Dim r As Long
+            For r = LBound(fetched, 1) To UBound(fetched, 1)
+                Dim k As String: k = fetched(r, 0)
+                Dim v(1) As String
+                v(0) = NzStr(GetOr(dict, k, 0)) ' Bbg
+                v(1) = NzStr(GetOr(dict, k, 1)) ' Ric
+                If LenB(fetched(r, 1)) <> 0 Then v(0) = fetched(r, 1)
+                If LenB(fetched(r, 2)) <> 0 Then v(1) = fetched(r, 2)
+                dict(k) = v ' upsert en mémoire
+            Next r
+        End If
+        
+        ' 4) Upsert BD: n’ajoute/maj QUE ce qui manque réellement (transaction + requêtes paramétrées)
+        If Not IsEmpty(fetched) Then
+            UpsertMasterIsin fetched, True  ' True = update seulement les champs manquants
+        End If
+    End If
+    
+    ' 5) Construire le tableau final dans l’ordre des ISIN demandés
+    ResolveInstruments = BuildResultArray(arr, dict)
+    
+    'Debug.Print "ResolveInstruments done in "; Format(Timer - t0, "0.000"); "s"
+End Function
+
+
+' =======================
+' =   DAO / Access      =
+' =======================
+
+' Assure indices + table tampon (si absents). Idempotent.
+Private Sub EnsureSchemaFast()
+    On Error GoTo Quiet
+    CurrentDb.Execute _
+        "CREATE INDEX ix_MasterIsin_Isin ON MasterIsin(Isin) WITH PRIMARY", dbFailOnError
+Quiet:
+    Err.Clear
+    On Error GoTo 0
+    
+    On Error Resume Next
+    CurrentDb.Execute "CREATE INDEX ix_MasterIsin_Bbg ON MasterIsin(BloombergTicker)", dbFailOnError
+    CurrentDb.Execute "CREATE INDEX ix_MasterIsin_Ric ON MasterIsin(Ric)", dbFailOnError
+    On Error GoTo 0
+    
+    ' Table tampon pour gros volumes (clé primaire sur Isin)
+    On Error GoTo MakeTmp
+    CurrentDb.TableDefs("Tmp_Isins").Fields.Refresh
+    Exit Sub
+MakeTmp:
+    On Error GoTo 0
+    CurrentDb.Execute _
+        "CREATE TABLE Tmp_Isins (Isin TEXT(12) CONSTRAINT pk_Tmp_Isins PRIMARY KEY)", dbFailOnError
+End Sub
+
+' ---- ADAPTATIF ----
+Private Function LoadExistingToDictAdaptive(ByRef isins() As String) As Object
+    If (UBound(isins) + 1) <= ISIN_INLIST_THRESHOLD Then
+        Set LoadExistingToDictAdaptive = LoadExistingToDict_IN(isins)
+    Else
+        Set LoadExistingToDictAdaptive = LoadExistingToDict_JOIN(isins)
+    End If
+End Function
+
+' Version rapide pour listes petites/moyennes : IN-list + GetRows
+Private Function LoadExistingToDict_IN(ByRef isins() As String) As Object
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
+    
+    If UBound(isins) < 0 Then Set LoadExistingToDict_IN = dict: Exit Function
+    
+    Dim sql As String
+    sql = "SELECT Isin, BloombergTicker, Ric FROM MasterIsin " & _
+          "WHERE Isin IN (" & JoinQuoted(isins) & ");"
+          
+    Dim rs As DAO.Recordset
+    Set rs = CurrentDb.OpenRecordset(sql, dbOpenForwardOnly, dbReadOnly)
+    
+    Dim data As Variant
+    If Not (rs.BOF And rs.EOF) Then
+        data = rs.GetRows() ' -> (cols, rows)
+        Dim r As Long, n As Long: n = UBound(data, 2)
+        Dim v(1) As String
+        For r = 0 To n
+            v(0) = NzStr(data(1, r)) ' Bbg
+            v(1) = NzStr(data(2, r)) ' Ric
+            dict(CStr(data(0, r))) = v
+        Next r
+    End If
+    rs.Close
+    
+    ' Pré-remplir les manquants pour accès O(1) derrière
+    Dim i As Long, emptyVal(1) As String
+    For i = LBound(isins) To UBound(isins)
+        If Not dict.Exists(isins(i)) Then dict(isins(i)) = emptyVal
+    Next i
+    
+    Set LoadExistingToDict_IN = dict
+End Function
+
+' Version scalable gros volumes : table tampon + JOIN + GetRows
+Private Function LoadExistingToDict_JOIN(ByRef isins() As String) As Object
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
+    If UBound(isins) < 0 Then Set LoadExistingToDict_JOIN = dict: Exit Function
+    
+    Dim db As DAO.Database: Set db = CurrentDb
+    On Error GoTo CleanFail
+    DBEngine.BeginTrans
+    
+    ' 1) Purge + bulk insert (rapide)
+    db.Execute "DELETE FROM Tmp_Isins", dbFailOnError
+    
+    Dim rsTmp As DAO.Recordset
+    Set rsTmp = db.OpenRecordset("Tmp_Isins", dbOpenDynaset)
+    Dim i As Long
+    For i = LBound(isins) To UBound(isins)
+        rsTmp.AddNew
+        rsTmp!Isin = isins(i)
+        rsTmp.Update
+    Next i
+    rsTmp.Close
+    
+    ' 2) Join indexé
+    Dim sql As String
+    sql = "SELECT m.Isin, m.BloombergTicker, m.Ric " & _
+          "FROM MasterIsin AS m INNER JOIN Tmp_Isins AS t ON m.Isin = t.Isin"
+    
+    Dim rs As DAO.Recordset
+    Set rs = db.OpenRecordset(sql, dbOpenForwardOnly, dbReadOnly)
+    Dim data As Variant
+    If Not (rs.BOF And rs.EOF) Then
+        data = rs.GetRows()
+        Dim r As Long, n As Long: n = UBound(data, 2)
+        Dim v(1) As String
+        For r = 0 To n
+            v(0) = NzStr(data(1, r))
+            v(1) = NzStr(data(2, r))
+            dict(CStr(data(0, r))) = v
+        Next r
+    End If
+    rs.Close
+    
+    DBEngine.CommitTrans
+    
+    ' 3) Pré-remplir manquants
+    Dim emptyVal(1) As String
+    For i = LBound(isins) To UBound(isins)
+        If Not dict.Exists(isins(i)) Then dict(isins(i)) = emptyVal
+    Next i
+    
+    Set LoadExistingToDict_JOIN = dict
+    Exit Function
+
+CleanFail:
+    On Error Resume Next
+    DBEngine.Rollback
+    Set LoadExistingToDict_JOIN = dict
+End Function
+
+' Upsert: insère ou remplit seulement les champs manquants si onlyFillMissing=True
+Private Function UpsertMasterIsin(ByVal rows As Variant, ByVal onlyFillMissing As Boolean) As Long
+    ' rows: 2D (n x 3) => (Isin, Bbg, Ric)
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim qInsert As DAO.QueryDef, qUpdBbg As DAO.QueryDef, qUpdRic As DAO.QueryDef
+    
+    On Error GoTo SafeClean
+    DBEngine.BeginTrans
+    
+    ' Requêtes paramétrées (compilées une fois)
+    Set qInsert = db.CreateQueryDef("", _
+        "INSERT INTO MasterIsin(Isin, BloombergTicker, Ric, LastUpdated) VALUES(?,?,?,Now())")
+    qInsert.Parameters.Append qInsert.CreateParameter("pIsin", dbText)
+    qInsert.Parameters.Append qInsert.CreateParameter("pBbg", dbText)
+    qInsert.Parameters.Append qInsert.CreateParameter("pRic", dbText)
+    
+    Set qUpdBbg = db.CreateQueryDef("", _
+        "UPDATE MasterIsin SET BloombergTicker=?, LastUpdated=Now() WHERE Isin=?")
+    qUpdBbg.Parameters.Append qUpdBbg.CreateParameter("pBbg", dbText)
+    qUpdBbg.Parameters.Append qUpdBbg.CreateParameter("pIsin", dbText)
+    
+    Set qUpdRic = db.CreateQueryDef("", _
+        "UPDATE MasterIsin SET Ric=?, LastUpdated=Now() WHERE Isin=?")
+    qUpdRic.Parameters.Append qUpdRic.CreateParameter("pRic", dbText)
+    qUpdRic.Parameters.Append qUpdRic.CreateParameter("pIsin", dbText)
+    
+    ' Snapshot EXISTANTS pour décider insert vs update (sans re-requêter en boucle)
+    Dim dictExisting As Object: Set dictExisting = CreateObject("Scripting.Dictionary")
+    dictExisting.CompareMode = vbTextCompare
+    Dim rs As DAO.Recordset
+    Set rs = db.OpenRecordset("SELECT Isin, Nz(BloombergTicker,'') AS Bbg, Nz(Ric,'') AS Ric FROM MasterIsin", dbOpenSnapshot)
+    Do While Not rs.EOF
+        Dim k As String: k = rs!Isin
+        Dim v(1) As String
+        v(0) = rs!Bbg: v(1) = rs!Ric
+        dictExisting(k) = v
+        rs.MoveNext
+    Loop
+    rs.Close
+    
+    Dim r As Long, affected As Long
+    For r = LBound(rows, 1) To UBound(rows, 1)
+        Dim isin As String: isin = rows(r, 0)
+        Dim bbg As String:  bbg = NzStr(rows(r, 1))
+        Dim ric As String:  ric = NzStr(rows(r, 2))
+        
+        If dictExisting.Exists(isin) Then
+            Dim cur() As String: cur = dictExisting(isin)
+            If Not onlyFillMissing Or (LenB(bbg) <> 0 And LenB(cur(0)) = 0) Then
+                qUpdBbg.Parameters(0).Value = bbg
+                qUpdBbg.Parameters(1).Value = isin
+                qUpdBbg.Execute dbFailOnError
+                affected = affected + qUpdBbg.RecordsAffected
+            End If
+            If Not onlyFillMissing Or (LenB(ric) <> 0 And LenB(cur(1)) = 0) Then
+                qUpdRic.Parameters(0).Value = ric
+                qUpdRic.Parameters(1).Value = isin
+                qUpdRic.Execute dbFailOnError
+                affected = affected + qUpdRic.RecordsAffected
+            End If
+        Else
+            qInsert.Parameters(0).Value = isin
+            qInsert.Parameters(1).Value = bbg
+            qInsert.Parameters(2).Value = ric
+            qInsert.Execute dbFailOnError
+            affected = affected + qInsert.RecordsAffected
+        End If
+    Next r
+    
+    DBEngine.CommitTrans
+    UpsertMasterIsin = affected
+    Exit Function
+
+SafeClean:
+    On Error Resume Next
+    DBEngine.Rollback
+    On Error GoTo 0
+    Err.Raise Err.Number, "UpsertMasterIsin", Err.Description
+End Function
+
+
+' =======================
+' =   Logic / arrays    =
+' =======================
+
+Private Function ComputeMissing(ByRef isins() As String, ByRef dict As Object, ByVal provider As DataProvider) As String()
+    Dim tmp() As String
+    ReDim tmp(0 To -1)
+    
+    Dim i As Long
+    For i = LBound(isins) To UBound(isins)
+        Dim key As String: key = isins(i)
+        Dim v() As String: v = dict(key) ' (Bbg, Ric)
+        Select Case provider
+            Case dpBloomberg
+                If LenB(v(0)) = 0 Then PushString tmp, key
+            Case dpWorkspace
+                If LenB(v(1)) = 0 Then PushString tmp, key
+        End Select
+    Next i
+    ComputeMissing = tmp
+End Function
+
+Private Function BuildResultArray(ByRef isins() As String, ByRef dict As Object) As Variant
+    Dim n As Long: n = UBound(isins) - LBound(isins) + 1
+    Dim res() As Variant
+    ReDim res(0 To n - 1, 0 To 2)
+    
+    Dim i As Long
+    For i = 0 To n - 1
+        Dim k As String: k = isins(LBound(isins) + i)
+        Dim v() As String: v = dict(k)
+        res(i, 0) = k
+        res(i, 1) = v(0)
+        res(i, 2) = v(1)
+    Next i
+    BuildResultArray = res
+End Function
+
+
+' =======================
+' =   API hooks (stubs) =
+' =======================
+' >>> À REMPLACER par tes appels batch Bloomberg / LSEG Workspace. <<<
+' Retour attendu: 2D Variant (rows) colonnes: Isin, BloombergTicker, Ric
+
+Private Function BatchFetchFromProvider(ByRef isins() As String, ByVal provider As DataProvider) As Variant
+    Select Case provider
+        Case dpBloomberg
+            BatchFetchFromProvider = FetchBloombergIdentifiers(isins)
+        Case dpWorkspace
+            BatchFetchFromProvider = FetchWorkspaceIdentifiers(isins)
+    End Select
+End Function
+
+Private Function FetchBloombergIdentifiers(ByRef isins() As String) As Variant
+    ' TODO: implémente ton batch BLPAPI (ISIN -> BBG Ticker [+ RIC si dispo])
+    Dim n As Long: n = UBound(isins) - LBound(isins) + 1
+    Dim res() As Variant
+    ReDim res(0 To n - 1, 0 To 2)
+    Dim i As Long
+    For i = 0 To n - 1
+        res(i, 0) = isins(LBound(isins) + i)
+        res(i, 1) = "TCKR" & CStr(i)          ' BloombergTicker
+        res(i, 2) = ""                         ' RIC optionnel
+    Next i
+    FetchBloombergIdentifiers = res
+End Function
+
+Private Function FetchWorkspaceIdentifiers(ByRef isins() As String) As Variant
+    ' TODO: implémente ton batch LSEG Workspace (ISIN -> RIC [+ BBG si dispo])
+    Dim n As Long: n = UBound(isins) - LBound(isins) + 1
+    Dim res() As Variant
+    ReDim res(0 To n - 1, 0 To 2)
+    Dim i As Long
+    For i = 0 To n - 1
+        res(i, 0) = isins(LBound(isins) + i)
+        res(i, 1) = ""                         ' BloombergTicker optionnel
+        res(i, 2) = "RIC" & CStr(i)            ' Ric
+    Next i
+    FetchWorkspaceIdentifiers = res
+End Function
+
+
+' =======================
+' =   Utils rapides     =
+' =======================
+
+Private Function NormalizeIsinArray(ByVal v As Variant) As String()
+    Dim arr() As String
+    Dim i As Long
+    
+    If IsArray(v) Then
+        ReDim arr(0 To -1)
+        For i = LBound(v) To UBound(v)
+            Dim s As String: s = Trim$(CStr(v(i)))
+            If LenB(s) <> 0 Then PushString arr, UCase$(s)
+        Next i
+    ElseIf VarType(v) = vbString Then
+        Dim parts() As String: parts = Split(v, ",")
+        ReDim arr(0 To -1)
+        For i = LBound(parts) To UBound(parts)
+            Dim t As String: t = Trim$(parts(i))
+            If LenB(t) <> 0 Then PushString arr, UCase$(t)
+        Next i
+    Else
+        ReDim arr(0 To -1)
+    End If
+    
+    ' Uniques
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = vbTextCompare
+    For i = LBound(arr) To IIf(UBound(arr) >= 0, UBound(arr), -1)
+        If Not dict.Exists(arr(i)) Then dict.Add arr(i), 1
+    Next i
+    
+    Dim out() As String: ReDim out(0 To dict.Count - 1)
+    i = 0
+    Dim k As Variant
+    For Each k In dict.Keys
+        out(i) = CStr(k): i = i + 1
+    Next k
+    NormalizeIsinArray = out
+End Function
+
+Private Sub PushString(ByRef arr() As String, ByVal s As String)
+    Dim n As Long: n = IIf((Not Not arr) = 0, 0, UBound(arr) + 1)
+    If n = 0 And ((Not Not arr) = 0) Then
+        ReDim arr(0 To 0)
+    Else
+        ReDim Preserve arr(0 To n)
+    End If
+    arr(n) = s
+End Sub
+
+Private Function JoinQuoted(ByRef arr() As String) As String
+    Dim i As Long, b As String
+    For i = LBound(arr) To UBound(arr)
+        If LenB(b) <> 0 Then b = b & ","
+        b = b & "'" & Replace(arr(i), "'", "''") & "'"
+    Next i
+    JoinQuoted = b
+End Function
+
+Private Function NzStr(ByVal v As Variant) As String
+    If IsNull(v) Then NzStr = "" Else NzStr = CStr(v)
+End Function
+
+Private Function GetOr(ByRef dict As Object, ByVal key As String, ByVal idx As Long) As String
+    If dict.Exists(key) Then
+        Dim a() As String: a = dict(key)
+        GetOr = a(idx)
+    Else
+        GetOr = ""
+    End If
+End Function
+
+
+
+Sub Demo()
+    Dim inputIsins As Variant
+    inputIsins = Array("FR0000131104", "US0378331005", "XS0971721963")
+    
+    Dim res As Variant
+    res = ResolveInstruments(inputIsins, dpBloomberg) ' ou dpWorkspace
+    
+    ' res est un tableau 2D: (i,0)=ISIN, (i,1)=BloombergTicker, (i,2)=Ric
+    Dim i As Long
+    For i = LBound(res, 1) To UBound(res, 1)
+        Debug.Print res(i, 0), res(i, 1), res(i, 2)
+    Next i
+End Sub
+
+plus rapide
+Private Function UpsertMasterIsin(ByVal rows As Variant, ByVal onlyFillMissing As Boolean) As Long
+    ' rows: 2D (n x 3) => (Isin, Bbg, Ric)
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim i As Long, n As Long
+    
+    If IsEmpty(rows) Then Exit Function
+    
+    ' 0) Assurer la table tampon
+    On Error GoTo MakeTmp
+    CurrentDb.TableDefs("Tmp_Upsert").Fields.Refresh
+    GoTo SkipMake
+MakeTmp:
+    On Error GoTo 0
+    db.Execute _
+        "CREATE TABLE Tmp_Upsert (" & _
+        " Isin TEXT(12) CONSTRAINT pk_Tmp_Upsert PRIMARY KEY," & _
+        " BloombergTicker TEXT(64)," & _
+        " Ric TEXT(32)" & _
+        ")", dbFailOnError
+SkipMake:
+
+    On Error GoTo FailAll
+    DBEngine.BeginTrans
+    
+    ' 1) Purge + bulk insert des lignes à upserter
+    db.Execute "DELETE FROM Tmp_Upsert", dbFailOnError
+    
+    Dim rsTmp As DAO.Recordset
+    Set rsTmp = db.OpenRecordset("Tmp_Upsert", dbOpenDynaset)
+    For i = LBound(rows, 1) To UBound(rows, 1)
+        rsTmp.AddNew
+        rsTmp!Isin = CStr(rows(i, 0))
+        rsTmp!BloombergTicker = NzStr(rows(i, 1))
+        rsTmp!Ric = NzStr(rows(i, 2))
+        rsTmp.Update
+    Next i
+    rsTmp.Close
+    
+    ' 2) UPDATE existants
+    If onlyFillMissing Then
+        ' Remplit uniquement les champs vides
+        db.Execute _
+            "UPDATE MasterIsin AS m " & _
+            "INNER JOIN Tmp_Upsert AS t ON m.Isin = t.Isin " & _
+            "SET m.BloombergTicker = t.BloombergTicker, m.LastUpdated = Now() " & _
+            "WHERE (m.BloombergTicker IS NULL OR m.BloombergTicker='') " & _
+            "AND (t.BloombergTicker IS NOT NULL AND t.BloombergTicker<>'')", dbFailOnError
+        
+        db.Execute _
+            "UPDATE MasterIsin AS m " & _
+            "INNER JOIN Tmp_Upsert AS t ON m.Isin = t.Isin " & _
+            "SET m.Ric = t.Ric, m.LastUpdated = Now() " & _
+            "WHERE (m.Ric IS NULL OR m.Ric='') " & _
+            "AND (t.Ric IS NOT NULL AND t.Ric<>'')", dbFailOnError
+    Else
+        ' Écrase systématiquement
+        db.Execute _
+            "UPDATE MasterIsin AS m " & _
+            "INNER JOIN Tmp_Upsert AS t ON m.Isin = t.Isin " & _
+            "SET m.BloombergTicker = t.BloombergTicker, " & _
+            "    m.Ric = t.Ric, " & _
+            "    m.LastUpdated = Now()", dbFailOnError
+    End If
+    
+    ' 3) INSERT nouveaux
+    db.Execute _
+        "INSERT INTO MasterIsin(Isin, BloombergTicker, Ric, LastUpdated) " & _
+        "SELECT t.Isin, t.BloombergTicker, t.Ric, Now() " & _
+        "FROM Tmp_Upsert AS t " & _
+        "LEFT JOIN MasterIsin AS m ON m.Isin = t.Isin " & _
+        "WHERE m.Isin IS NULL", dbFailOnError
+    
+    ' 4) Compter les lignes touchées (approx rapide: lignes dans Tmp_Upsert)
+    n = DCount("*", "Tmp_Upsert")
+    
+    DBEngine.CommitTrans
+    UpsertMasterIsin = n
+    Exit Function
+
+FailAll:
+    On Error Resume Next
+    DBEngine.Rollback
+    Err.Raise Err.Number, "UpsertMasterIsin", Err.Description
+End Function
+
+
