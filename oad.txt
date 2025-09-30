@@ -1,0 +1,455 @@
+# ) Dropdown (liste déroulante) auto-alimentée
+
+```
+Private Sub EnsureAssetTypeDropdown()
+    If Not CFG_USE_ASSET_FILTER Then Exit Sub
+    If COL_TYPE <= 0 Then Exit Sub
+    Call LoadDataCacheIfNeeded
+
+    Dim ws As Worksheet: Set ws = SheetUI
+    Dim types As Object: Set types = CreateObject("Scripting.Dictionary")
+    Dim i As Long, v As String
+    types.CompareMode = vbTextCompare
+
+    For i = 1 To SafeUBound(gDataArr, 1)
+        v = Trim$(CStr(gDataArr(i, COL_TYPE)))
+        If Len(v) > 0 Then If Not types.Exists(v) Then types.Add v, True
+    Next i
+
+    Dim arr() As String, k As Variant, n As Long
+    n = types.Count
+    ReDim arr(0 To n) ' +1 pour "(All)"
+    arr(0) = "(All)"
+    i = 1
+    For Each k In types.Keys
+        arr(i) = CStr(k)
+        i = i + 1
+    Next k
+    '— Tri simple (facultatif)
+    Call QuickSortStrings(arr, 1, UBound(arr))
+
+    ' Alimente la validation (si la concat > 255 chars, on bascule sur une plage)
+    Dim listStr As String: listStr = Join(arr, ",")
+    With ws.Range(CFG_FILTER_ADDR).Validation
+        .Delete
+    End With
+    If Len(listStr) <= 255 Then
+        ws.Range(CFG_FILTER_ADDR).Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+            Operator:=xlBetween, Formula1:=listStr
+    Else
+        ' écrit la liste en Z1:Zx et utilise cette plage
+        Dim z As Range: Set z = ws.Range("Z1").Resize(UBound(arr) + 1, 1)
+        z.Worksheet.Columns("Z").ClearContents
+        z.Value = WorksheetFunction.Transpose(arr)
+        ws.Range(CFG_FILTER_ADDR).Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+            Operator:=xlBetween, Formula1:="=" & z.Address(True, True)
+    End If
+End Sub
+
+Private Sub QuickSortStrings(ByRef a() As String, ByVal lo As Long, ByVal hi As Long)
+    Dim i As Long, j As Long, p As String, t As String
+    i = lo: j = hi: p = a((lo + hi) \ 2)
+    Do While i <= j
+        Do While StrComp(a(i), p, vbTextCompare) < 0: i = i + 1: Loop
+        Do While StrComp(a(j), p, vbTextCompare) > 0: j = j - 1: Loop
+        If i <= j Then t = a(i): a(i) = a(j): a(j) = t: i = i + 1: j = j - 1
+    Loop
+    If lo < j Then QuickSortStrings a, lo, j
+    If i < hi Then QuickSortStrings a, i, hi
+End Sub
+
+Private Function CurrentAssetFilter() As String
+    If Not CFG_USE_ASSET_FILTER Or COL_TYPE <= 0 Then Exit Function
+    Dim v As String: v = Trim$(CStr(SheetUI.Range(CFG_FILTER_ADDR).Value))
+    If v = "(All)" Then v = ""
+    CurrentAssetFilter = v
+End Function
+
+
+```
+
+Appelle l’initialisation au bon moment (ex. à la fin de LiveType_Enable et aussi après le chargement des données) :
+
+```
+Call EnsureAssetTypeDropdown
+
+
+```
+
+
+3) Filtrage des résultats Top-K
+```
+Private Sub FilterTopKByAsset(ByRef bestIdx() As Long, ByRef bestScore() As Double, ByRef got As Long)
+    If got <= 0 Then Exit Sub
+    If Not CFG_USE_ASSET_FILTER Or COL_TYPE <= 0 Then Exit Sub
+
+    Dim want As String: want = CurrentAssetFilter()
+    If Len(want) = 0 Then Exit Sub
+
+    Dim i As Long, keepN As Long
+    Dim keepI() As Long, keepS() As Double
+    ReDim keepI(1 To got): ReDim keepS(1 To got)
+
+    For i = 1 To got
+        If StrComp(CStr(gDataArr(bestIdx(i), COL_TYPE)), want, vbTextCompare) = 0 Then
+            keepN = keepN + 1
+            keepI(keepN) = bestIdx(i)
+            keepS(keepN) = bestScore(i)
+        End If
+    Next i
+
+    If keepN = 0 Then
+        got = 0
+    Else
+        ReDim Preserve keepI(1 To keepN)
+        ReDim Preserve keepS(1 To keepN)
+        bestIdx = keepI
+        bestScore = keepS
+        got = keepN
+    End If
+End Sub
+
+
+```
+
+Ensuite, branche ce filtre juste après chaque calcul Top-K :
+
+Dans UpdateLive :
+```
+TopMatches_NameOrISIN_FAST_IDX gBuffer, COL_NAME, COL_ISIN, CFG_TOPN, idx, sc, got
+FilterTopKByAsset idx, sc, got
+ShowResults_Dynamic idx, sc, got
+
+
+```
+
+Dans BatchResolve_FromB2 (aux 3 endroits où tu appelles TopMatches_…) :
+```
+TopMatches_NameOrISIN_FAST_IDX q, COL_NAME, COL_ISIN, topK, idx, sc, got
+FilterTopKByAsset idx, sc, got
+' ... puis WriteBlockDynamic / WriteOneRowDynamic ...
+
+
+```
+4) Rafraîchir quand l’utilisateur change le type
+```
+Private Sub Worksheet_Change(ByVal Target As Range)
+    On Error GoTo Fin
+    If Intersect(Target, Me.Range(CFG_FILTER_ADDR)) Is Nothing Then GoTo Fin
+    If Live_GetActive Then
+        ' Recalcule à partir du buffer courant
+        LiveType_UpdateFromCell ' si tu veux resynchroniser via B2
+        ' ou directement :
+        ' CallByName ThisWorkbook.VBProject.VBComponents("<NomDuModule>").CodeModule, ...
+        ' plus simple :
+        Application.Run "'" & ThisWorkbook.Name & "'!UpdateLive"
+    Else
+        ' même hors mode live, on peut rafraîchir la zone de sortie basée sur B2
+        Application.Run "'" & ThisWorkbook.Name & "'!LiveType_UpdateFromCell"
+    End If
+Fin:
+End Sub
+
+
+```
+
+# ou
+
+Yes ! On peut ajouter un filtre “Asset type” (pris de ta colonne SOURCE) avec une liste déroulante, et s’en servir pour accélérer le moteur en réduisant le jeu de candidats.
+
+Voici des patchs prêts à coller (tout en VBA, minimal-invasif). Ils font 3 choses :
+
+Affichent une liste déroulante (ex. en C2) si activée.
+
+Filtrent l’affichage pour ne montrer que la catégorie choisie.
+
+Accélèrent la recherche : tous les candidats qui ne sont pas du type choisi sont écartés très tôt (et le scan “bruteforce” ne parcourt que les lignes du type).
+
+1) Config & état global
+
+Ajoute ceci dans la section CONFIG + ÉTAT GLOBAL :
+
+'=============================== CONFIG FILTRE TYPE ===========================
+Private Const CFG_USE_TYPE_FILTER As Boolean = True   ' activer/désactiver le filtre
+Private Const CFG_TYPE_ADDR       As String = "C2"    ' cellule de la liste déroulante
+Private Const CFG_TYPE_LABEL_ADDR As String = "C1"    ' étiquette facultative
+'=============================================================================
+
+'============================== ÉTAT GLOBAL (suite) ==========================
+Private gTypeIndex As Object       ' Dict: type (String lower) -> Long() indices lignes
+Private gActiveType As String      ' type courant choisi par l'utilisateur (lower, ""=tous)
+'=============================================================================
+
+
+Si tu préfères sans référence Scripting Runtime, on reste en late binding (As Object + CreateObject).
+
+2) Construction d’un index par type
+
+Dans LoadDataCacheIfNeeded, après BuildPrefixIndex et avant/après les n-grams, ajoute :
+
+Call BuildTypeIndex
+
+
+Ajoute le module suivant :
+
+Private Sub BuildTypeIndex()
+    If Not gTypeIndex Is Nothing Then Exit Sub
+    Set gTypeIndex = CreateObject("Scripting.Dictionary")
+    Dim n As Long: n = SafeUBound(gDataArr, 1)
+    If n < 1 Then Exit Sub
+    Dim i As Long, t As String
+    For i = 1 To n
+        t = LCase$(Trim$(CStr(gDataArr(i, COL_SOURCE)))) ' COL_SOURCE = ta colonne type
+        If t = "" Then t = "(blank)"
+        If Not gTypeIndex.Exists(t) Then
+            Dim arr() As Long: ReDim arr(1 To 1): arr(1) = i
+            gTypeIndex.Add t, arr
+        Else
+            Dim a() As Long: a = gTypeIndex(t)
+            ReDim Preserve a(1 To UBound(a) + 1)
+            a(UBound(a)) = i
+            gTypeIndex(t) = a
+        End If
+    Next i
+End Sub
+
+3) Liste déroulante (création / mise à jour)
+
+Quand tu actives le live (LiveType_Enable), si le filtre est activé, on déploie la DV (Data Validation). Dans LiveType_Enable, après LoadDataCacheIfNeeded et ClearOutput, insère :
+
+If CFG_USE_TYPE_FILTER Then
+    EnsureTypeDropdown
+    gActiveType = GetTypeSelection() ' initialise à la valeur de la liste
+End If
+
+
+Ajoute ces helpers :
+
+Private Sub EnsureTypeDropdown()
+    On Error Resume Next
+    If gTypeIndex Is Nothing Then BuildTypeIndex
+    On Error GoTo 0
+    Dim ws As Worksheet: Set ws = SheetUI
+    Dim lab As Range: Set lab = ws.Range(CFG_TYPE_LABEL_ADDR)
+    Dim tgt As Range: Set tgt = ws.Range(CFG_TYPE_ADDR)
+
+    ' Etiquette
+    lab.Value = "Asset type"
+    lab.Font.Bold = True
+
+    ' Construire la liste: "All;{types triés...}"
+    Dim keys As Variant, i As Long
+    keys = gTypeIndex.Keys
+    If Not IsEmpty(keys) Then
+        ' tri simple
+        Dim j As Long, tmp As Variant
+        For i = LBound(keys) To UBound(keys) - 1
+            For j = i + 1 To UBound(keys)
+                If CStr(keys(j)) < CStr(keys(i)) Then tmp = keys(i): keys(i) = keys(j): keys(j) = tmp
+            Next j
+        Next i
+    End If
+    Dim listText As String: listText = "All"
+    For i = LBound(keys) To UBound(keys)
+        listText = listText & "," & keys(i)
+    Next i
+
+    With tgt.Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:=listText
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .ShowError = False
+    End With
+    If Len(CStr(tgt.Value)) = 0 Then tgt.Value = "All"
+End Sub
+
+Private Function GetTypeSelection() As String
+    Dim v As String
+    On Error Resume Next
+    v = LCase$(Trim$(CStr(SheetUI.Range(CFG_TYPE_ADDR).Value)))
+    On Error GoTo 0
+    If v = "" Or v = "all" Then
+        GetTypeSelection = ""
+    Else
+        GetTypeSelection = v
+    End If
+End Function
+
+
+Si tu veux réagir quand C2 change manuellement, tu peux appeler LiveType_UpdateFromCell depuis l’événement Worksheet_Change quand la cellule CFG_TYPE_ADDR est modifiée (facultatif : le live se mettra de toute façon à jour au prochain tap).
+
+4) Intégrer le filtre dans le cycle live
+
+Dans UpdateLive, lis le type puis passe-le au moteur :
+
+Private Sub UpdateLive()
+    Call WriteInput(gBuffer)
+    If Len(Trim$(gBuffer)) = 0 Then ClearOutput: Exit Sub
+
+    Call LoadDataCacheIfNeeded
+    If CFG_USE_TYPE_FILTER Then gActiveType = GetTypeSelection() Else gActiveType = ""
+
+    Dim idx() As Long, sc() As Double, got As Long
+    Call TopMatches_NameOrISIN_FAST_IDX(gBuffer, COL_NAME, COL_ISIN, CFG_TOPN, idx, sc, got, gActiveType)
+    Call ShowResults_Dynamic(idx, sc, got)
+End Sub
+
+mieux..
+If CFG_USE_TYPE_FILTER Then
+    Dim tSel As String: tSel = GetTypeSelection()  ' déjà en lower
+    gActiveType = tSel
+Else
+    gActiveType = ""
+End If
+
+
+On change la signature de la fonction moteur (voir §5).
+
+5) Moteur : filtrer tôt + accélérer
+
+Change la déclaration de TopMatches_NameOrISIN_FAST_IDX pour ajouter un argument typeFilter :
+
+Private Sub TopMatches_NameOrISIN_FAST_IDX( _
+    ByVal q As String, ByVal cName As Long, ByVal cIsin As Long, ByVal K As Long, _
+    ByRef bestIdx() As Long, ByRef bestScore() As Double, ByRef got As Long, _
+    Optional ByVal typeFilter As String = "" _
+)
+
+
+Ajoute ce helper :
+
+Private Function IsAllowedType(ByVal rowIdx As Long, ByVal typeFilter As String) As Boolean
+    If Len(typeFilter) = 0 Then
+        IsAllowedType = True
+    Else
+        Dim t As String
+        t = LCase$(Trim$(CStr(gDataArr(rowIdx, COL_SOURCE))))
+        IsAllowedType = (t = typeFilter)
+    End If
+End Function
+
+5.1. Filtrer dans les sélections par index
+
+Dans SelectCandidatesPrefix3, ajoute le paramètre typeFilter et le test IsAllowedType :
+
+Signature :
+
+Private Sub SelectCandidatesPrefix3(ByVal qs As String, ByVal qi As String, _
+    ByRef candIdx() As Long, ByRef candS() As Double, _
+    ByRef have As Long, ByVal maxCand As Long, _
+    Optional ByVal typeFilter As String = "" _
+)
+
+
+Appel (depuis TopMatches_...) :
+remplace
+
+SelectCandidatesPrefix3 qs, qi, candIdx, candS, have, maxCand
+
+
+par
+
+SelectCandidatesPrefix3 qs, qi, candIdx, candS, have, maxCand, typeFilter
+
+
+Dans la boucle de SelectCandidatesPrefix3, filtre :
+
+For ii = LBound(arr) To UBound(arr)
+    R = arr(ii)
+    If Not IsAllowedType(R, typeFilter) Then GoTo NextR
+    sQ = QuickScoreCached(qs, qi, gNameL(R), gIsinU(R))
+    If sQ > 0 Then PushCandidate R, sQ, candIdx, candS, have, maxCand
+NextR:
+Next ii
+
+5.2. Filtrer dans les sélections n-gram
+
+Même principe pour SelectCandidatesNgram :
+
+Signature :
+
+Private Sub SelectCandidatesNgram(ByVal qs As String, ByVal qi As String, _
+    ByRef candIdx() As Long, ByRef candS() As Double, _
+    ByRef have As Long, ByVal maxCand As Long, _
+    Optional ByVal typeFilter As String = "" _
+)
+
+
+Appel :
+
+SelectCandidatesNgram qs, qi, candIdx, candS, have, maxCand, typeFilter
+
+
+Dans les deux branches (tri-gram et bi-gram) avant de pousser un R, ajoute :
+
+If Not IsAllowedType(R, typeFilter) Then GoTo SkipPush
+' ...
+PushCandidate R, sQpush, candIdx, candS, have, maxCand
+SkipPush:
+
+5.3. Filtrer le scan “fallback” (bruteforce)
+
+Dans TopMatches_NameOrISIN_FAST_IDX, dans le bloc “Dernier recours : scan complet”, remplace :
+
+Dim stepN As Long: stepN = MaxLong(1, n \ 4000)
+' ...
+For R = 1 To n Step stepN
+    sQ = QuickScoreCached(qs, qi, gNameL(R), gIsinU(R))
+    If sQ > 0 Then PushCandidate R, sQ, candIdx, candS, have, maxCand
+Next R
+
+
+par une version restreinte au type si typeFilter<>"" :
+
+Dim stepN As Long: stepN = MaxLong(1, n \ 4000)
+Dim arrType() As Long, tCnt As Long, ii As Long
+
+If Len(typeFilter) > 0 And Not gTypeIndex Is Nothing Then
+    If gTypeIndex.Exists(typeFilter) Then
+        arrType = gTypeIndex(typeFilter)
+        tCnt = UBound(arrType)
+        Dim stepT As Long: stepT = MaxLong(1, tCnt \ 4000)
+        For ii = LBound(arrType) To UBound(arrType) Step stepT
+            R = arrType(ii)
+            sQ = QuickScoreCached(qs, qi, gNameL(R), gIsinU(R))
+            If sQ > 0 Then PushCandidate R, sQ, candIdx, candS, have, maxCand
+        Next ii
+    End If
+Else
+    For R = 1 To n Step stepN
+        sQ = QuickScoreCached(qs, qi, gNameL(R), gIsinU(R))
+        If sQ > 0 Then PushCandidate R, sQ, candIdx, candS, have, maxCand
+    Next R
+End If
+
+5.4. Cap de theta (si tu ne l’as pas encore fait)
+
+Toujours dans TopMatches_NameOrISIN_FAST_IDX, conserve la sécurité :
+
+If best(K) >= 0# Then theta = IIf(best(K) > 1#, 1#, best(K))
+
+6) Bonus : rafraîchir quand l’utilisateur change C2
+
+Facultatif, dans le module de la feuille UI, pour relancer la recherche à chaque changement de la liste :
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    On Error GoTo Fin
+    If Intersect(Target, Me.Range(CFG_TYPE_ADDR)) Is Nothing Then Exit Sub
+    If Live_GetActive Then
+        Call LiveType_UpdateFromCell   ' remet à jour avec le buffer courant + filtre
+    End If
+Fin:
+End Sub
+
+Effet performance
+
+Oui, le filtre accélère : on écarte massivement dès la sélection de candidats (préfixe et n-grams) et on restreint le fallback au seul sous-ensemble du type.
+
+Si tu veux aller encore plus loin, on peut bâtir des index par type (ex. gIdxGram3_ByType(type)(gram) -> indices) pour ne plus intersecter au vol — mais le patch ci-dessus donne déjà un gain net sans multiplier les structures.
+
+Si tu veux, je peux te livrer une version du module complet avec tous les patchs intégrés d’un bloc.
+```
+
+
+```
