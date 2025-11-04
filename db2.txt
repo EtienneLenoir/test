@@ -1,0 +1,1776 @@
+D’ouvrir Excel → Données > Obtenir des données > Paramètres des sources de données
+
+De cliquer sur Global > Modifier les paramètres de confidentialité
+
+De cocher :
+
+✔️ Toujours ignorer les contrôles de niveaux de confidentialité
+ou
+
+Définir “P:\EXPORTS_GESTION” comme “Organisation”
+
+Ainsi, il n’aura jamais la boîte de dialogu
+
+| Niveau                              | Description                                                                                                                                        | Quand l’utiliser                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Privé** 🔒                        | Les données sont sensibles, ne doivent **jamais être combinées** avec d’autres sources sans ta validation. Power Query isole totalement la source. | Données confidentielles : RH, paie, clients, etc.                             |
+| **Organisation / Professionnel** 🏢 | Données internes à ton entreprise : peuvent être combinées entre elles, mais **pas** avec des données publiques.                                   | Données réseau interne, partages `P:\`, bases internes, SQL de ton entreprise |
+| **Public** 🌍                       | Données ouvertes et non sensibles : peuvent être combinées librement avec tout.                                                                    | Fichiers CSV publics, sources web, open data                                  |
+| **Aucun** 🚫                        | Power Query **n’applique aucun contrôle de confidentialité** (équivalent à “Ignorer les contrôles de niveaux de confidentialité”).                 | Si tu es dans un environnement sûr et que tu veux éviter les popups           |
+
+# import
+
+mieux
+'===============================================================================
+' Crée ou met à jour la table Excel (ListObject) liée à une requête Power Query.
+'===============================================================================
+Private Sub AddOrReuseListObject(ByVal wb As Workbook, ByVal queryName As String)
+    Dim ws As Worksheet
+    Set ws = EnsureSheet(wb, SHEET_IMPORT)
+
+    Dim lo As ListObject
+    On Error Resume Next
+    Set lo = ws.ListObjects(TABLE_IMPORT)  ' essaye de retrouver la table existante
+    On Error GoTo 0
+
+    ' --- CAS 1 : aucune table existante → création propre ---------------------
+    If lo Is Nothing Then
+        Dim newLO As ListObject
+        Dim qt As QueryTable
+
+        ' crée une nouvelle ListObject reliée à la requête PowerQuery
+        Set newLO = ws.ListObjects.Add( _
+            SourceType:=0, _
+            Source:="OLEDB;Provider=" & PQ_PROVIDER & _
+                    ";Data Source=" & PQ_SRC & _
+                    ";Location=" & queryName & _
+                    ";Extended Properties=""""")
+
+        ' configure la QueryTable sous-jacente
+        Set qt = newLO.QueryTable
+        With qt
+            .CommandType = xlCmdSql
+            .CommandText = Array("SELECT * FROM [" & queryName & "]")
+            .AdjustColumnWidth = True
+            .PreserveColumnInfo = True
+            .Refresh BackgroundQuery:=False
+        End With
+
+        ' renomme le ListObject nouvellement créé
+        newLO.Name = TABLE_IMPORT
+
+    ' --- CAS 2 : table déjà existante → mise à jour de la requête -------------
+    Else
+        With lo.QueryTable
+            .Connection = "OLEDB;Provider=" & PQ_PROVIDER & _
+                          ";Data Source=" & PQ_SRC & _
+                          ";Location=" & queryName & _
+                          ";Extended Properties="""""
+            .CommandType = xlCmdSql
+            .CommandText = Array("SELECT * FROM [" & queryName & "]")
+            .Refresh BackgroundQuery:=False
+        End With
+    End If
+End Sub
+
+
+Option Explicit
+
+' ====== Paramétrage ======
+Private Const PQ_PROVIDER As String = "Microsoft.Mashup.OleDb.1"
+Private Const PQ_SRC       As String = "$Workbook$"
+Private Const SHEET_IMPORT As String = "DataImport"
+Private Const TABLE_IMPORT As String = "tblDataImport"
+Private Const COL_BOOKING  As String = "Booking"
+
+' Chemin racine pour le mode ALL (à adapter si besoin)
+Private Const ROOT_ALL As String = "P:\EXPORTS_GESTION\Gateway\LVAL\Input_LLCR\"
+Private Const ALL_PREFIX As String = "LLCR_"
+Private ALL_BOOKINGS As Variant ' rempli à la volée
+
+' ====== Public API ======
+Public Sub ImportCSVToTablePowerQuery(ByVal csvPath As String)
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim fileName As String, extracted As String, booking As String
+    Dim culture As String, isAll As Boolean
+
+    SafeStart
+
+    fileName = Mid$(csvPath, InStrRev(csvPath, "\") + 1)
+    extracted = Left$(fileName, InStrRev(fileName, ".") - 1)
+
+    ' Booking = 2e morceau après "_" si présent, sinon "UNK"
+    booking = ParseBooking(extracted)
+    isAll = (UCase$(booking) = "ALL")
+
+    culture = IIf(InStr(1, extracted, "IND", vbTextCompare) > 0, "fr-FR", "en-US")
+
+    If isAll Then
+        ALL_BOOKINGS = Array("CAI", "CFM", "ESP", "HKG", "IND", "ITL", "LUX", "SNG") ' BEL omis per ton commentaire
+        AddOrReplaceQuery wb, extracted, BuildM_AllBookings(culture)
+    Else
+        AddOrReplaceQuery wb, extracted, BuildM_Single(csvPath, culture, booking)
+    End If
+
+    AddOrReuseListObject wb, extracted  ' branche la requête dans la feuille/tbl
+
+    HideQueriesPane
+
+SafeExit:
+    SafeStop
+    Exit Sub
+SafeErr:
+    MsgBox "Erreur ImportCSVToTablePowerQuery: " & Err.Number & " - " & Err.Description, vbCritical
+    Resume SafeExit
+End Sub
+
+Public Sub SelectFolderInput()
+    ' Suppose FctSelectFolder(ws_main.Name, "RngMainPathFolder") existe
+    On Error GoTo SafeErr
+    FctSelectFolder ws_main.Name, "RngMainPathFolder"
+    Exit Sub
+SafeErr:
+    MsgBox "SelectFolderInput: " & Err.Description, vbExclamation
+End Sub
+
+Public Sub ImportCSVData(ByVal PathImport As String, ByVal wsDataImport As Worksheet)
+    On Error GoTo SafeErr
+
+    SafeStart
+
+    Dim wsData As Worksheet
+    Set wsData = EnsureSheet(ThisWorkbook, SHEET_IMPORT)
+
+    With wsDataImport
+        Dim lastRow As Long, lastCol As Long
+        lastRow = .Cells(.Rows.Count, 1).End(xlUp).Row
+        lastCol = .Cells(1, .Columns.Count).End(xlToLeft).Column
+        .Range(.Cells(1, 1), .Cells(lastRow, lastCol)).Copy
+    End With
+
+    With wsData
+        .Range("A1").PasteSpecial Paste:=xlPasteValuesAndNumberFormats
+    End With
+
+    ' Ferme le fichier CSV ouvert, en late binding (pas besoin de réf Scripting)
+    Dim FSO As Object: Set FSO = CreateObject("Scripting.FileSystemObject")
+    Dim wbName As String: wbName = CStr(FSO.GetFileName(CStr(PathImport)))
+    On Error Resume Next
+    Workbooks(wbName).Close SaveChanges:=False
+    On Error GoTo 0
+
+SafeExit:
+    SafeStop
+    Exit Sub
+SafeErr:
+    MsgBox "ImportCSVData: " & Err.Description, vbExclamation
+    Resume SafeExit
+End Sub
+
+Public Function CreateNewSht(ByVal sheetName As String, Optional ByVal NoDel As Boolean) As Worksheet
+    ' Retourne toujours la feuille cible, recréée ou vidée
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim ws As Worksheet
+
+    If NoDel Then
+        If SheetExists(sheetName) Then
+            wb.Sheets(sheetName).Cells.Clear
+            Set CreateNewSht = wb.Sheets(sheetName)
+            Exit Function
+        End If
+    Else
+        On Error Resume Next
+        Application.DisplayAlerts = False
+        wb.Sheets(sheetName).Delete
+        Application.DisplayAlerts = True
+        On Error GoTo 0
+    End If
+
+    Set ws = wb.Sheets.Add(After:=wb.Sheets(1))
+    ws.Name = sheetName
+    Set CreateNewSht = ws
+End Function
+
+Public Function GetDropDownValue(ByVal NameControle As String) As String
+    ' Sécurise l’accès à ws_main.DropDowns
+    Dim dd As DropDown
+    If ws_main Is Nothing Then
+        Err.Raise vbObjectError + 100, "GetDropDownValue", "ws_main n'est pas initialisée."
+    End If
+    Set dd = ws_main.DropDowns(NameControle)
+    If dd Is Nothing Then
+        Err.Raise vbObjectError + 101, "GetDropDownValue", "Contrôle introuvable: " & NameControle
+    End If
+    If dd.Value < 1 Or dd.Value > dd.ListCount Then
+        Err.Raise vbObjectError + 102, "GetDropDownValue", "Aucun élément sélectionné."
+    End If
+    GetDropDownValue = dd.List(dd.Value)
+End Function
+
+' ====== Helpers ======
+Private Sub AddOrReuseListObject(ByVal wb As Workbook, ByVal queryName As String)
+    Dim ws As Worksheet: Set ws = EnsureSheet(wb, SHEET_IMPORT)
+    Dim lo As ListObject
+
+    ' Essaie de retrouver le tableau existant
+    On Error Resume Next
+    Set lo = ws.ListObjects(TABLE_IMPORT)
+    On Error GoTo 0
+
+    If lo Is Nothing Then
+        ' Crée une nouvelle table connectée à la requête
+        Dim qt As QueryTable
+        Set qt = ws.ListObjects.Add( _
+            SourceType:=0, _
+            Source:="OLEDB;Provider=" & PQ_PROVIDER & ";Data Source=" & PQ_SRC & ";Location=" & queryName & ";Extended Properties=""""" _
+        ).QueryTable
+
+        With qt
+            .CommandType = xlCmdSql
+            .CommandText = Array("SELECT * FROM [" & queryName & "]")
+            .AdjustColumnWidth = True
+            .PreserveColumnInfo = True
+            .Refresh BackgroundQuery:=False
+        End With
+
+        ws.ListObjects(1).Name = TABLE_IMPORT
+    Else
+        ' Rebranche la commande et rafraîchis
+        With lo.QueryTable
+            .Connection = "OLEDB;Provider=" & PQ_PROVIDER & ";Data Source=" & PQ_SRC & ";Location=" & queryName & ";Extended Properties="""""
+            .CommandType = xlCmdSql
+            .CommandText = Array("SELECT * FROM [" & queryName & "]")
+            .Refresh BackgroundQuery:=False
+        End With
+    End If
+End Sub
+
+Private Sub AddOrReplaceQuery(ByVal wb As Workbook, ByVal name As String, ByVal mFormula As String)
+    Dim q As WorkbookQuery
+    Dim exists As Boolean
+
+    For Each q In wb.Queries
+        If q.Name = name Then
+            exists = True
+            Exit For
+        End If
+    Next q
+
+    If exists Then
+        q.Formula = mFormula
+    Else
+        wb.Queries.Add Name:=name, Formula:=mFormula
+    End If
+End Sub
+
+Private Function BuildM_Single(ByVal csvPath As String, ByVal culture As String, ByVal booking As String) As String
+    Dim m As String
+    m = _
+    "let" & vbCrLf & _
+    "    Source = Csv.Document(File.Contents(""" & csvPath & """), [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+    "    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true])," & vbCrLf & _
+    "    TrimmedText = Table.TransformColumns(PromotedHeaders, {{" & _
+            """MONTANT ENG/SUR"", each Text.Trim(_)}, {""MONTANT LIMITE"", each Text.Trim(_)}, {""MONTANT MIN SURETE"", each Text.Trim(_)}, {""NO INTV PERE DU GRP RISQ"", each Text.Trim(_)}, {""LIBELLE TYPE DE SURETE"", each Text.Trim(_)}})," & vbCrLf & _
+    "    ReplacedApostrophes = Table.ReplaceValue(TrimmedText, ""'"", "" "", Replacer.ReplaceText, {""MONTANT ENG/SUR"", ""MONTANT LIMITE"", ""MONTANT MIN SURETE""})," & vbCrLf & _
+    "    RemovedInnerSpaces = Table.TransformColumns(ReplacedApostrophes, {{" & _
+            """MONTANT ENG/SUR"", each Text.Replace(_, "" "", """")}, {""MONTANT LIMITE"", each Text.Replace(_, "" "", """")}, {""MONTANT MIN SURETE"", each Text.Replace(_, "" "", """")}})," & vbCrLf & _
+    "    Typed = Table.TransformColumnTypes(RemovedInnerSpaces, {{" & _
+            """MONTANT ENG/SUR"", type number}, {""MONTANT LIMITE"", type number}, {""MONTANT MIN SURETE"", type number}}, """ & culture & """)," & vbCrLf & _
+    "    AddedBooking = Table.AddColumn(Typed, """" & COL_BOOKING & """", each """ & booking & """)" & vbCrLf & _
+    "in" & vbCrLf & _
+    "    AddedBooking"
+    BuildM_Single = m
+End Function
+
+Private Function BuildM_AllBookings(ByVal defaultCulture As String) As String
+    Dim i As Long, b As String, culture As String, parts As Collection
+    Set parts = New Collection
+
+    For i = LBound(ALL_BOOKINGS) To UBound(ALL_BOOKINGS)
+        b = CStr(ALL_BOOKINGS(i))
+        culture = IIf(UCase$(b) = "IND", "fr-FR", "en-US")
+        parts.Add _
+            "    S" & b & " = Csv.Document(File.Contents(""" & ROOT_ALL & ALL_PREFIX & b & ".csv""), [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+            "    H" & b & " = Table.PromoteHeaders(S" & b & ", [PromoteAllScalars=true])," & vbCrLf & _
+            "    T1" & b & " = Table.TransformColumns(H" & b & ", {{" & _
+                """MONTANT ENG/SUR"", each Text.Trim(_)}, {""MONTANT LIMITE"", each Text.Trim(_)}, {""MONTANT MIN SURETE"", each Text.Trim(_)}, {""NO INTV PERE DU GRP RISQ"", each Text.Trim(_)}, {""LIBELLE TYPE DE SURETE"", each Text.Trim(_)}})," & vbCrLf & _
+            "    T2" & b & " = Table.ReplaceValue(T1" & b & ", ""'"", "" "", Replacer.ReplaceText, {""MONTANT ENG/SUR"", ""MONTANT LIMITE"", ""MONTANT MIN SURETE""})," & vbCrLf & _
+            "    T3" & b & " = Table.TransformColumns(T2" & b & ", {{" & _
+                """MONTANT ENG/SUR"", each Text.Replace(_, "" "", """")}, {""MONTANT LIMITE"", each Text.Replace(_, "" "", """")}, {""MONTANT MIN SURETE"", each Text.Replace(_, "" "", """")}})," & vbCrLf & _
+            "    Typed" & b & " = Table.TransformColumnTypes(T3" & b & ", {{" & _
+                """MONTANT ENG/SUR"", type number}, {""MONTANT LIMITE"", type number}, {""MONTANT MIN SURETE"", type number}}, """ & culture & """)," & vbCrLf & _
+            "    A" & b & " = Table.AddColumn(Typed" & b & ", """" & COL_BOOKING & """", each """ & b & """),"
+    Next i
+
+    Dim combineRefs As String: combineRefs = ""
+    For i = LBound(ALL_BOOKINGS) To UBound(ALL_BOOKINGS)
+        b = CStr(ALL_BOOKINGS(i))
+        combineRefs = combineRefs & "A" & b & ","
+    Next i
+    combineRefs = Left$(combineRefs, Len(combineRefs) - 1)
+
+    Dim m As String
+    m = "let" & vbCrLf & JoinCollection(parts) & vbCrLf & _
+        "    Combined = Table.Combine({" & combineRefs & "})" & vbCrLf & _
+        "in" & vbCrLf & _
+        "    Combined"
+    BuildM_AllBookings = m
+End Function
+
+Private Function JoinCollection(ByVal col As Collection) As String
+    Dim i As Long, s As String
+    For i = 1 To col.Count
+        s = s & CStr(col(i)) & vbCrLf
+    Next i
+    JoinCollection = s
+End Function
+
+Private Function EnsureSheet(ByVal wb As Workbook, ByVal name As String) As Worksheet
+    If SheetExists(name) Then
+        Set EnsureSheet = wb.Sheets(name)
+    Else
+        Set EnsureSheet = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+        EnsureSheet.Name = name
+    End If
+End Function
+
+Private Function SheetExists(ByVal name As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(name)
+    SheetExists = Not ws Is Nothing
+    On Error GoTo 0
+End Function
+
+Private Function ParseBooking(ByVal extracted As String) As String
+    Dim parts As Variant
+    parts = Split(extracted, "_")
+    If UBound(parts) >= 1 Then
+        ParseBooking = parts(1)
+    Else
+        ParseBooking = "UNK"
+    End If
+End Function
+
+Private Sub HideQueriesPane()
+    On Error Resume Next
+    Application.CommandBars("Queries and Connections").Visible = False
+    On Error GoTo 0
+End Sub
+
+' ====== Safe toggles (perf) ======
+Private Sub SafeStart()
+    On Error GoTo SafeErr
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.DisplayStatusBar = False
+    Application.Calculation = xlCalculationManual
+    Exit Sub
+SafeErr:
+    ' no-op
+End Sub
+
+Private Sub SafeStop()
+    On Error Resume Next
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.DisplayStatusBar = True
+    Application.Calculation = xlCalculationAutomatic
+    On Error GoTo 0
+End Sub
+
+# Main
+
+Sub Main()
+    Dim PathImport As String, booking As String, t0 As Double
+    t0 = FctTimer(True)
+    Optimize True
+    
+    booking = GetDropDownValue("SelectBooking")
+    PathImport = EnsureTrailingSlash(ws_main.[RngMainPathFolder]) & "LLCR_" & booking & ".csv"
+    
+    CreateNewSht "DataImport"
+    CreateNewSht "Result_" & booking
+    ImportCSVToTablePowerQuery PathImport
+    
+    MainCreateArrResult
+    
+    Optimize False
+    MsgBox FctTimer(False, FctTimer(True) - t0), vbInformation, "RPC CAI PARIS"
+End Sub
+
+Private Function EnsureTrailingSlash(ByVal p As String) As String
+    If Len(p) > 0 And Right$(p, 1) <> "\" Then
+        EnsureTrailingSlash = p & "\"
+    Else
+        EnsureTrailingSlash = p
+    End If
+End Function
+
+
+Function LoadDictNumDossierSum(ArrInput() As Variant, ColSum As Integer, _
+                               TypeSurete As String, Optional BoolAll As Boolean) As Dictionary
+    Dim DictTemp As New Dictionary
+    Dim i As Long, ColDossier As Integer, ColIndLS As Integer, ColNiveau As Integer
+    Dim ColBooking As Integer: ColBooking = 0
+    Dim key As String, tmp As Double
+    
+    ColDossier = FctNumCol(True, "NO DOSSIER CREDIT", False, , ArrInput, , "Ws Crédit")
+    ColIndLS   = FctNumCol(True, "INDICATEUR LIGNE-SURETE", False, , ArrInput, , "Ws Crédit")
+    ColNiveau  = FctNumCol(True, "NIVEAU", False, , ArrInput, , "Ws Crédit")
+    If BoolAll Then ColBooking = FctNumCol(True, "Booking", False, , ArrInput, , "Ws Crédit")
+    
+    For i = LBound(ArrInput, 1) + 1 To UBound(ArrInput, 1)
+        If BoolAll And ColBooking > 0 Then
+            key = ArrInput(i, ColDossier) & "__" & ArrInput(i, ColBooking)
+        Else
+            key = ArrInput(i, ColDossier)
+        End If
+        
+        If CStr(ArrInput(i, ColIndLS)) = TypeSurete And CStr(ArrInput(i, ColNiveau)) = "1" Then
+            tmp = ToNumber(ArrInput(i, ColSum)) ' gère % et virgules
+            If Not DictTemp.Exists(key) Then
+                DictTemp.Add key, tmp
+            Else
+                DictTemp(key) = DictTemp(key) + tmp
+            End If
+        End If
+    Next i
+    Set LoadDictNumDossierSum = DictTemp
+End Function
+
+Function LoadDictNumDossier(ArrInput() As Variant, Optional BoolAll As Boolean) As Dictionary
+    Dim DictTemp As New Dictionary
+    Dim LastLigne As Variant, LastGrp As Variant
+    Dim i As Long, ColInt As Long, ColDossier As Long, ColGrp As Long, ColLigne As Long
+    Dim ColBooking As Integer: ColBooking = 0
+    Dim key As String, booking As String
+    
+    ColInt   = FctNumCol(True, "NO INTERVENANT", False, , ArrInput, , "Ws Crédit")
+    ColGrp   = FctNumCol(True, "NO INTV PERE DU GRP RISQ", False, , ArrInput, , "Ws Crédit")
+    ColLigne = FctNumCol(True, "LIGNE PRODUIT", False, , ArrInput, , "Ws Crédit")
+    ColDossier = FctNumCol(True, "NO DOSSIER CREDIT", False, , ArrInput, , "Ws Crédit")
+    If BoolAll Then ColBooking = FctNumCol(True, "Booking", False, , ArrInput, , "Ws Crédit")
+    
+    For i = LBound(ArrInput, 1) + 1 To UBound(ArrInput, 1)
+        If ArrInput(i, ColGrp) <> "" Then LastGrp = ArrInput(i, ColGrp)
+        If ArrInput(i, ColLigne) <> "" Then LastLigne = ArrInput(i, ColLigne)
+        If BoolAll And ColBooking > 0 Then booking = ArrInput(i, ColBooking)
+        
+        If BoolAll And ColBooking > 0 Then
+            key = ArrInput(i, ColDossier) & "__" & booking
+        Else
+            key = ArrInput(i, ColDossier)
+        End If
+        
+        If Not DictTemp.Exists(key) Then
+            DictTemp.Add CStr(key), ArrInput(i, ColInt) & "__" & LastGrp & "__" & LastLigne & "__" & booking
+        End If
+    Next i
+    Set LoadDictNumDossier = DictTemp
+End Function
+
+Private Function ToNumber(ByVal v As Variant) As Double
+    ' Accepte "1 234,56", "12,5%", "", Null
+    Dim s As String: s = CStr(v)
+    s = Replace$(s, " ", "")
+    s = Replace$(s, "%", "")
+    s = Replace$(s, ",", ".")
+    If Len(s) = 0 Then
+        ToNumber = 0#
+    ElseIf IsNumeric(s) Then
+        ToNumber = CDbl(s)
+    Else
+        ToNumber = 0#
+    End If
+End Function
+
+Private Function GetOrZero(ByVal d As Dictionary, ByVal k As String) As Double
+    If d.Exists(k) Then
+        GetOrZero = CDbl(d(k))
+    Else
+        GetOrZero = 0#
+    End If
+End Function
+
+# Stats
+
+Option Explicit
+
+' =========================
+'  UTILITAIRES GÉNÉRIQUES
+' =========================
+Private Function ToNumber(ByVal v As Variant) As Double
+    Dim s As String: s = CStr(v)
+    s = Replace$(s, " ", "")
+    s = Replace$(s, "%", "")
+    s = Replace$(s, ",", ".")
+    If Len(s) = 0 Or Not IsNumeric(s) Then
+        ToNumber = 0#
+    Else
+        ToNumber = CDbl(s)
+    End If
+End Function
+
+Private Function HeaderIndex(ByRef arr As Variant, ByVal headerName As String) As Long
+    ' arr(1, j) = entêtes ligne 1
+    Dim j As Long
+    For j = LBound(arr, 2) To UBound(arr, 2)
+        If StrComp(CStr(arr(1, j)), headerName, vbTextCompare) = 0 Then
+            HeaderIndex = j
+            Exit Function
+        End If
+    Next j
+    HeaderIndex = 0 ' non trouvé
+End Function
+
+Private Function LoadClustersFromSheet(wsMain As String, tableName As String) As Variant
+    Dim rng As Range, data As Variant, i As Long, res() As Variant
+    On Error Resume Next
+    Set rng = ThisWorkbook.Sheets(wsMain).ListObjects(tableName).DataBodyRange
+    On Error GoTo 0
+    If rng Is Nothing Then
+        MsgBox "Table '" & tableName & "' introuvable sur '" & wsMain & "'.", vbExclamation
+        Exit Function
+    End If
+    data = rng.Value
+    ReDim res(1 To UBound(data, 1))
+    For i = 1 To UBound(data, 1)
+        res(i) = Array(ToNumber(data(i, 1)), ToNumber(data(i, 2)))
+    Next i
+    LoadClustersFromSheet = res
+End Function
+
+Private Sub Write2D(ByVal ws As Worksheet, ByVal topRow As Long, ByVal leftCol As Long, ByRef arr As Variant)
+    ws.Cells(topRow, leftCol).Resize(UBound(arr, 1), UBound(arr, 2)).Value = arr
+End Sub
+
+Private Function StartColAfterLast(ByVal ws As Worksheet, Optional ByVal padCols As Long = 2) As Long
+    StartColAfterLast = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column + padCols
+End Function
+
+Private Function ParseClusterLowerM(ByVal labelM As String) As Double
+    ' "1M-5M EUR" -> 1
+    Dim part As String
+    part = Split(labelM, "M")(0)
+    ParseClusterLowerM = ToNumber(part)
+End Function
+
+Private Function ParseClusterLowerPct(ByVal labelPct As String) As Double
+    ' "50%-80%" -> 50
+    ParseClusterLowerPct = ToNumber(Split(labelPct, "%")(0))
+End Function
+
+' =========================
+'      CŒUR STATISTIQUES
+' =========================
+Public Sub GenerateChartWithClustersArray()   ' point d’entrée (compatibilité)
+    Call GenerateStatsDurable
+End Sub
+
+Public Sub GenerateStatsDurable()
+    Dim t0 As Double: t0 = FctTimer(True)
+    Optimize True
+    
+    Dim booking As String: booking = GetDropDownValue("SelectBookingStats")
+    Dim srcWsName As String: srcWsName = "Result_" & booking
+    Dim outWsName As String: outWsName = "Result_" & booking & "_Stats"
+    
+    If Not SheetExists(srcWsName) Then
+        MsgBox "La feuille " & srcWsName & " est absente. Lance d'abord la génération LLCR pour " & booking, vbInformation, "LLCR Stats"
+        GoTo FinallyExit
+    End If
+    
+    ' 1) Charger les données source dans un tableau mémoire + filtrer métier (tu gardes ta fonction)
+    Dim data As Variant
+    data = FctLoadArr(srcWsName, "A1")
+    data = FctMainArrFilterSpecial(data, 6, "MPB05") ' (colonne 6 = "Ligne" d’après ton modèle)
+
+    ' 2) Résoudre les colonnes par NOM (pas par lettre)
+    Dim cDrop As Long, cProd As Long, cDoss As Long, cIntv As Long, cGrp As Long
+    Dim cLigne As Long, cLimite As Long, cConso As Long, cSurete As Long, cTaux As Long, cTemp As Long, cSolde As Long
+    cDrop = HeaderIndex(data, "DropDownValue")
+    cProd = HeaderIndex(data, "Production Date")
+    cDoss = HeaderIndex(data, "NO DOSSIER CREDIT")
+    cIntv = HeaderIndex(data, "NO INTERVENANT")
+    cGrp  = HeaderIndex(data, "NO INTERVENANT GRP")
+    cLigne = HeaderIndex(data, "Ligne")
+    cLimite = HeaderIndex(data, "Limite")
+    cConso  = HeaderIndex(data, "Consommation")
+    cSurete = HeaderIndex(data, "Montant Sureté")
+    cTaux   = HeaderIndex(data, "Taux de couverture")
+    cTemp   = HeaderIndex(data, "Temp")
+    cSolde  = HeaderIndex(data, "Solde")
+    
+    If (cLimite * cConso * cSurete) = 0 Then
+        MsgBox "Colonnes manquantes (Limite / Consommation / Montant Sureté).", vbExclamation
+        GoTo FinallyExit
+    End If
+
+    ' 3) Préparer la feuille de sortie
+    CreateNewSht outWsName, True
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets(outWsName)
+    DisplayArr data, outWsName, "A1" ' on affiche la source filtrée pour audit
+
+    ' 4) Clusters montant (€) et seuils
+    Dim clustersEur As Variant
+    clustersEur = LoadClustersFromSheet(ws_main.Name, "TableLimiteCredit")
+    
+    Dim seuilRatioConso As Double, seuilMinLimite As Double
+    seuilRatioConso = ToNumber(ws_main.[MainRngLimiteRatioConso].Value)
+    seuilMinLimite  = ToNumber(ws_main.[MainRngLimiteCreditMin].Value)
+    
+    ' 5) Calculs rapides en mémoire (RatioCouverture / ClusterLimite / RatioConso)
+    Dim n As Long: n = UBound(data, 1) - 1
+    If n <= 0 Then GoTo ChartsPart
+    
+    Dim outQRS() As Variant: ReDim outQRS(1 To n + 1, 1 To 3)
+    outQRS(1, 1) = "Ratio Couverture"
+    outQRS(1, 2) = "Cluster Limite"
+    outQRS(1, 3) = "Ratio Consommé"
+    
+    Dim i As Long, lim As Double, conso As Double, sur As Double
+    Dim ratioCov As Double, ratioConso As Double, lbl As String
+    Dim rowCount As Long: rowCount = 1
+    
+    For i = 2 To UBound(data, 1)
+        lim = ToNumber(data(i, cLimite))
+        conso = ToNumber(data(i, cConso))
+        sur = ToNumber(data(i, cSurete))
+        
+        If conso <> 0 Then ratioCov = Abs(sur / conso) Else ratioCov = 0#
+        ' fidèle à ta formule : I<>0 ET G>1 → -H/G sinon 0
+        If (sur <> 0) And (lim > 1) Then ratioConso = IIf(lim <> 0, -conso / lim, 0#) Else ratioConso = 0#
+        
+        ' étiquette cluster € (sur la Limite)
+        lbl = "Hors Cluster"
+        If ratioConso >= seuilRatioConso And Abs(lim) >= seuilMinLimite Then
+            Dim c As Variant
+            For Each c In clustersEur
+                If lim >= c(0) And lim < c(1) Then
+                    lbl = Format(c(0) / 1000000, IIf(c(0) < 1000000, "0.0", "0")) & "M-" & Format(c(1) / 1000000, "0") & "M EUR"
+                    Exit For
+                End If
+            Next c
+        End If
+        
+        rowCount = rowCount + 1
+        outQRS(rowCount, 1) = ratioCov
+        outQRS(rowCount, 2) = lbl
+        outQRS(rowCount, 3) = ratioConso
+    Next i
+    
+    ' 6) Écriture des 3 colonnes calculées (Q/R/S dynamiques)
+    Dim startQ As Long: startQ = StartColAfterLast(ws, 2)
+    Write2D ws, 1, startQ, outQRS
+    
+    ' 7) Table agrégée par cluster (moyenne RatioCouverture et nombre)
+    Dim agg As Object: Set agg = CreateObject("Scripting.Dictionary")
+    Dim key As String, acc As Variant
+    
+    For i = 2 To rowCount
+        If ToNumber(outQRS(i, 3)) >= seuilRatioConso And _
+           Abs(ToNumber(data(i, cLimite))) >= seuilMinLimite Then
+            key = CStr(outQRS(i, 2))
+            If key <> "Hors Cluster" And Len(key) > 0 Then
+                If Not agg.Exists(key) Then
+                    agg.Add key, Array(outQRS(i, 1), 1) ' somme, n
+                Else
+                    acc = agg(key)
+                    acc(0) = ToNumber(acc(0)) + ToNumber(outQRS(i, 1))
+                    acc(1) = acc(1) + 1
+                    agg(key) = acc
+                End If
+            End If
+        End If
+    Next i
+    
+    Dim aggArr() As Variant, k As Variant, r As Long
+    ReDim aggArr(1 To agg.Count + 1, 1 To 3)
+    aggArr(1, 1) = "Cluster Limite"
+    aggArr(1, 2) = "Moyenne Ratio Couverture"
+    aggArr(1, 3) = "Nombre"
+    r = 1
+    For Each k In agg.Keys
+        r = r + 1
+        acc = agg(k)
+        aggArr(r, 1) = CStr(k)
+        aggArr(r, 2) = IIf(acc(1) > 0, ToNumber(acc(0)) / acc(1) - 1, 0#) ' excédent (>100%) = moyenne - 1
+        aggArr(r, 3) = acc(1)
+    Next k
+    
+    Dim startAgg As Long: startAgg = StartColAfterLast(ws, 2)
+    Write2D ws, 1, startAgg, aggArr
+    
+    ' Tri par borne basse M
+    Dim sortKeyCol As Long: sortKeyCol = startAgg + 3
+    ws.Cells(1, sortKeyCol).Value = "Sort Key"
+    For i = 2 To r
+        ws.Cells(i, sortKeyCol).Value = ParseClusterLowerM(ws.Cells(i, startAgg).Value)
+    Next i
+    With ws.Sort
+        .SortFields.Clear
+        .SortFields.Add Key:=ws.Range(ws.Cells(2, sortKeyCol), ws.Cells(r, sortKeyCol)), _
+                        SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+        .SetRange ws.Range(ws.Cells(1, startAgg), ws.Cells(r, sortKeyCol))
+        .Header = xlYes
+        .Apply
+    End With
+    ws.Columns(sortKeyCol).EntireColumn.Delete
+    
+    ' 8) Graphe 1 (Excédent Couverture / Tirage)
+    Dim co As ChartObject, ser As Excel.Series, ii As Long
+    For Each co In ws.ChartObjects: co.Delete: Next co
+    
+    Set co = ws.ChartObjects.Add(Left:=300, Width:=500, Top:=50, Height:=300)
+    With co.Chart
+        .ChartType = xlColumnClustered
+        .SetSourceData Source:=ws.Range(ws.Cells(1, startAgg), ws.Cells(r, startAgg + 1))
+        .HasTitle = True
+        .ChartTitle.Text = "Excédent Couverture / Tirage"
+        .Axes(xlCategory).HasTitle = True
+        .Axes(xlCategory).AxisTitle.Text = "Tirage"
+        .Axes(xlValue).HasTitle = True
+        .Axes(xlValue).AxisTitle.Text = "Excédent de Couverture (>100%)"
+        .Axes(xlValue).TickLabels.NumberFormat = "0%"
+        .Axes(xlValue).HasMajorGridlines = False
+        Set ser = .SeriesCollection(1)
+        ser.ApplyDataLabels
+        ser.Format.Fill.ForeColor.RGB = RGB(122, 104, 85)
+        For ii = 2 To r
+            ser.Points(ii - 1).DataLabel.Text = _
+                "Avg: " & Format(ws.Cells(ii, startAgg + 1).Value, "0.00%") & Chr(10) & _
+                "Nb: " & ws.Cells(ii, startAgg + 2).Value
+        Next ii
+    End With
+
+ChartsPart:
+    ' 9) Graphe 2 (répartition par % couverture)
+    Dim clustersPct As Variant
+    clustersPct = LoadClustersFromSheet(ws_main.Name, "TableRatioCover")
+    If Not IsEmpty(clustersPct) Then
+        Dim dictPct As Object: Set dictPct = CreateObject("Scripting.Dictionary")
+        Dim ratio As Double
+        
+        ' On repart des colonnes calculées en mémoire (plus fiable)
+        For i = 2 To rowCount
+            ratio = ToNumber(outQRS(i, 1)) ' Ratio Couverture
+            If ToNumber(outQRS(i, 3)) >= seuilRatioConso And Abs(ToNumber(data(i, cLimite))) >= seuilMinLimite Then
+                ' Trouver la classe %
+                Dim pc As Variant, labelPct As String
+                labelPct = "Hors Cluster"
+                For Each pc In clustersPct
+                    If pc(1) = 0 Then pc(1) = 1# ' borne haute ouverte (100%)
+                    If ratio >= pc(0) And ratio < pc(1) Then
+                        If pc(1) <> 1# Then
+                            labelPct = Format(pc(0) * 100, "0") & "%-" & Format(pc(1) * 100, "0") & "%"
+                        Else
+                            labelPct = Format(pc(0) * 100, "0") & "%-Max"
+                        End If
+                        Exit For
+                    End If
+                Next pc
+                If labelPct <> "Hors Cluster" Then
+                    If Not dictPct.Exists(labelPct) Then dictPct.Add labelPct, 1 Else dictPct(labelPct) = dictPct(labelPct) + 1
+                End If
+            End If
+        Next i
+        
+        If dictPct.Count > 0 Then
+            Dim pctArr() As Variant: ReDim pctArr(1 To dictPct.Count + 1, 1 To 2)
+            pctArr(1, 1) = "Cluster Ratio Couverture": pctArr(1, 2) = "Nombre"
+            r = 1
+            For Each k In dictPct.Keys
+                r = r + 1
+                pctArr(r, 1) = k
+                pctArr(r, 2) = dictPct(k)
+            Next k
+            
+            Dim startPct As Long: startPct = StartColAfterLast(ws, 2)
+            Write2D ws, 1, startPct, pctArr
+            
+            ' tri par borne basse %
+            sortKeyCol = startPct + 2
+            ws.Cells(1, sortKeyCol).Value = "Sort Key"
+            For i = 2 To r
+                ws.Cells(i, sortKeyCol).Value = ParseClusterLowerPct(ws.Cells(i, startPct).Value)
+            Next i
+            With ws.Sort
+                .SortFields.Clear
+                .SortFields.Add Key:=ws.Range(ws.Cells(2, sortKeyCol), ws.Cells(r, sortKeyCol)), _
+                                SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+                .SetRange ws.Range(ws.Cells(1, startPct), ws.Cells(r, sortKeyCol))
+                .Header = xlYes
+                .Apply
+            End With
+            ws.Columns(sortKeyCol).EntireColumn.Delete
+            
+            ' graphe 2 (placé sous le 1er)
+            Dim top2 As Double, left2 As Double
+            top2 = ws.Cells(28, "F").Top
+            left2 = ws.Cells(28, "F").Left
+            Set co = ws.ChartObjects.Add(Left:=left2, Width:=500, Top:=top2, Height:=300)
+            With co.Chart
+                .ChartType = xlColumnClustered
+                .SetSourceData Source:=ws.Range(ws.Cells(1, startPct), ws.Cells(r, startPct + 1))
+                .HasTitle = True
+                .ChartTitle.Text = "Clients / Taux Couverture"
+                .Axes(xlCategory).HasTitle = True
+                .Axes(xlCategory).AxisTitle.Text = "Taux de Couverture"
+                .Axes(xlValue).HasTitle = True
+                .Axes(xlValue).AxisTitle.Text = "Nombre de Clients"
+                .Axes(xlValue).HasMajorGridlines = False
+                Set ser = .SeriesCollection(1)
+                ser.ApplyDataLabels
+                ser.Format.Fill.ForeColor.RGB = RGB(223, 218, 213)
+            End With
+        End If
+    End If
+
+FinallyExit:
+    Optimize False
+    MsgBox FctTimer(False, FctTimer(True) - t0), vbInformation, "Stats"
+End Sub
+
+# Best Main
+
+Option Explicit
+
+Private Type TCols
+    Dossier As Long
+    Interv As Long
+    IntervGrp As Long
+    LigneProd As Long
+    IndLigSur As Long
+    Niveau As Long
+    MtLimite As Long
+    MtEngSur As Long
+    TauxSureteExige As Long
+    LibTypeSurete As Long
+    Booking As Long ' présent si ALL
+End Type
+
+'=== MAIN identique, tu peux le garder tel quel ===
+'Sub Main(): ... End Sub
+
+Public Sub MainCreateArrResult()
+    Dim wsDataImport As Worksheet
+    Dim ArrInput As Variant, header As Variant
+    Dim cols As TCols
+    Dim isAll As Boolean
+    Dim map As Object ' Scripting.Dictionary : dossierKey -> per-dossier struct
+    Dim results As Variant
+    Dim dropVal As String
+    Dim prodDate As String
+    Dim doSort As Boolean
+
+    dropVal = GetDropDownValue("SelectBooking")
+    isAll = (UCase$(dropVal) = "ALL")
+    prodDate = Format(Date, "dd/mm/yyyy")
+
+    Set wsDataImport = ThisWorkbook.Worksheets("DataImport")
+    ArrInput = FctLoadArr(wsDataImport.Name, "A1")
+    header = ArrInput ' alias
+
+    ' 1) Map entêtes -> colonnes (une seule fois)
+    BuildHeaderMap ArrInput, cols, isAll
+
+    ' 2) Agrégation en une passe
+    Set map = AggregateDataOnePass(ArrInput, cols, isAll)
+
+    ' 3) Construire la matrice résultat
+    results = BuildResultArray(map, prodDate, dropVal, isAll)
+
+    ' 4) Tri optionnel (insuffisance puis solde)
+    doSort = (UCase$(FctFillIfEmpty(GetDropDownValue("SelectSort"))) = "OUI" Or _
+              UCase$(GetDropDownValue("SelectSort")) = "YES")
+    If doSort Then
+        results = ArrQuickSort(results, 13, True, True)
+        results = ArrQuickSort(results, 12, False, True)
+    End If
+
+    ' 5) Affichage + colonnes additionnelles (si tu les veux encore côté Excel)
+    Dim targetWs As String: targetWs = "Result_" & dropVal
+    DisplayArr results, targetWs, "A1", , , True
+    AddCol "SoldeGrp", targetWs, isAll
+    AddCol "FlagInsuffissance", targetWs, isAll
+
+    With ThisWorkbook.Worksheets(targetWs)
+        Dim columnsToFormat As Variant, c As Variant
+        columnsToFormat = Array("G", "H", "I", "J", "K", "L", "O")
+        For Each c In columnsToFormat
+            .Columns(c).NumberFormat = "#,##0"
+        Next c
+        .Activate
+    End With
+
+    If isAll Then
+        DeleteSheetDataImport ' si c’est ta logique
+    End If
+End Sub
+
+'==================== Helpers rapides ====================
+
+Private Sub BuildHeaderMap(ByRef Arr As Variant, ByRef cols As TCols, ByVal isAll As Boolean)
+    ' Recherche des colonnes une seule fois (plus robuste + rapide)
+    cols.Dossier = FctNumCol(True, "NO DOSSIER CREDIT", False, , Arr, , "Ws Crédit")
+    cols.Interv = FctNumCol(True, "NO INTERVENANT", False, , Arr, , "Ws Crédit")
+    cols.IntervGrp = FctNumCol(True, "NO INTV PERE DU GRP RISQ", False, , Arr, , "Ws Crédit")
+    cols.LigneProd = FctNumCol(True, "LIGNE PRODUIT", False, , Arr, , "Ws Crédit")
+    cols.IndLigSur = FctNumCol(True, "INDICATEUR LIGNE-SURETE", False, , Arr, , "Ws Crédit")
+    cols.Niveau = FctNumCol(True, "NIVEAU", False, , Arr, , "Ws Crédit")
+    cols.MtLimite = FctNumCol(True, "MONTANT LIMITE", False, , Arr, , "Ws Crédit")
+    cols.MtEngSur = FctNumCol(True, "MONTANT ENG/SUR", False, , Arr, , "Ws Crédit")
+    cols.TauxSureteExige = FctNumCol(True, "TAUX SURETE EXIGE", False, , Arr, , "Ws Crédit")
+    cols.LibTypeSurete = FctNumCol(True, "LIBELLE TYPE DE SURETE", False, , Arr, , "Ws Crédit")
+    If isAll Then
+        cols.Booking = FctNumCol(True, "Booking", False, , Arr, , "Ws Crédit")
+    Else
+        cols.Booking = 0
+    End If
+End Sub
+
+Private Function AggregateDataOnePass(ByRef Arr As Variant, ByRef cols As TCols, ByVal isAll As Boolean) As Object
+    ' Retourne dict: keyDossier -> Array/meta:
+    '   [0]=NO INTERVENANT
+    '   [1]=NO INTV PERE DU GRP RISQ
+    '   [2]=LIGNE PRODUIT (last seen non vide)
+    '   [3]=booking (si ALL)
+    '   [4]=SUM_LIMITE (L, NIVEAU=1)
+    '   [5]=SUM_CONSO  (L, NIVEAU=1)
+    '   [6]=SUM_SURETE (S, NIVEAU=1)  -> "Montant Sûreté"
+    '   [7]=SUM_TAUX   (S, NIVEAU=1)  -> "Taux de Couverture" (attention : somme simple comme dans ton code)
+    '   [8]=BLOCAGE CPTABLE (compteur par groupe)
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    Dim i As Long, n As Long
+    Dim key As String, dossier As String, booking As String
+    Dim niv As String, tag As String
+    Dim grp As String, lig As String
+    Dim interv As String
+    Dim valLim As Double, valConso As Double, valSurete As Double, valTaux As Double
+    Dim arrItem As Variant
+    Dim lastGrp As String, lastLigne As String
+
+    n = UBound(Arr, 1)
+    For i = 2 To n
+        dossier = CStr(Arr(i, cols.Dossier))
+        If Len(dossier) = 0 Then GoTo NextI
+
+        interv = CStr(Arr(i, cols.Interv))
+        If Len(Arr(i, cols.IntervGrp)) > 0 Then lastGrp = CStr(Arr(i, cols.IntervGrp))
+        If Len(Arr(i, cols.LigneProd)) > 0 Then lastLigne = CStr(Arr(i, cols.LigneProd))
+
+        grp = lastGrp
+        lig = lastLigne
+        niv = CStr(Arr(i, cols.Niveau))
+        tag = CStr(Arr(i, cols.IndLigSur))    ' "L" ou "S"
+
+        If isAll And cols.Booking > 0 Then
+            booking = CStr(Arr(i, cols.Booking))
+            key = dossier & "__" & booking
+        Else
+            booking = vbNullString
+            key = dossier
+        End If
+
+        If Not dict.Exists(key) Then
+            ReDim arrItem(0 To 8)
+            arrItem(0) = interv
+            arrItem(1) = grp
+            arrItem(2) = lig
+            arrItem(3) = booking
+            ' 4..7 = 0
+            arrItem(8) = 0 ' blocage cptable
+            dict.Add key, arrItem
+        Else
+            arrItem = dict(key)
+        End If
+
+        ' blocage comptable par groupe: si LIBELLE TYPE DE SURETE = "BLOCAGE CPTABLE"
+        If cols.LibTypeSurete > 0 Then
+            If CStr(Arr(i, cols.LibTypeSurete)) = "BLOCAGE CPTABLE" Then
+                arrItem(8) = arrItem(8) + 1
+            End If
+        End If
+
+        If niv = "1" Then
+            If tag = "L" Then
+                If cols.MtLimite > 0 Then
+                    valLim = Val(Replace(CStr(Arr(i, cols.MtLimite)), " ", ""))
+                    arrItem(4) = arrItem(4) + valLim
+                End If
+                If cols.MtEngSur > 0 Then
+                    valConso = Val(Replace(CStr(Arr(i, cols.MtEngSur)), " ", ""))
+                    arrItem(5) = arrItem(5) + valConso
+                End If
+            ElseIf tag = "S" Then
+                If cols.MtEngSur > 0 Then
+                    valSurete = Val(Replace(CStr(Arr(i, cols.MtEngSur)), " ", ""))
+                    arrItem(6) = arrItem(6) + valSurete
+                End If
+                If cols.TauxSureteExige > 0 Then
+                    ' ton code additionnait tel quel (en % texte possible) :
+                    Dim rawT As String: rawT = CStr(Arr(i, cols.TauxSureteExige))
+                    If InStr(rawT, "%") > 0 Then
+                        valTaux = Val(Replace(rawT, "%", ""))
+                    Else
+                        valTaux = Val(rawT)
+                    End If
+                    arrItem(7) = arrItem(7) + valTaux
+                End If
+            End If
+        End If
+
+        ' refresh méta (les “last seen”)
+        If Len(interv) > 0 Then arrItem(0) = interv
+        If Len(grp) > 0 Then arrItem(1) = grp
+        If Len(lig) > 0 Then arrItem(2) = lig
+
+        dict(key) = arrItem
+NextI:
+    Next i
+
+    Set AggregateDataOnePass = dict
+End Function
+
+Private Function BuildResultArray(ByVal dict As Object, ByVal prodDate As String, _
+                                  ByVal dropVal As String, ByVal isAll As Boolean) As Variant
+    Dim n As Long: n = dict.Count
+    Dim R() As Variant
+    Dim i As Long: i = 2
+    Dim k As Variant, it As Variant
+    ReDim R(1 To n + 1, 1 To 14)
+
+    ' entêtes
+    R(1, 1) = "DropDownValue"
+    R(1, 2) = "Production Date"
+    R(1, 3) = "NO DOSSIER CREDIT"
+    R(1, 4) = "NO INTERVENANT"
+    R(1, 5) = "NO INTERVENANT GRP"
+    R(1, 6) = "Ligne"
+    R(1, 7) = "Limite"
+    R(1, 8) = "Consommation"
+    R(1, 9) = "Montant Sureté"
+    R(1, 10) = "Taux de couverture"
+    R(1, 11) = "Temp"
+    R(1, 12) = "Solde"
+    R(1, 13) = "Flag insuffisance dossier"
+    R(1, 14) = "Blocage comptable sur les group"
+
+    For Each k In dict.Keys
+        it = dict(k)
+
+        ' (1) booking affiché
+        If isAll Then
+            R(i, 1) = it(3) ' booking
+        Else
+            R(i, 1) = dropVal
+        End If
+
+        ' (2) date
+        R(i, 2) = prodDate
+
+        ' (3) dossier
+        If isAll Then
+            R(i, 3) = Split(CStr(k), "__")(0)
+        Else
+            R(i, 3) = k
+        End If
+
+        ' meta
+        R(i, 4) = it(0) ' NO INTERVENANT
+        R(i, 5) = it(1) ' NO INTV PERE DU GRP RISQ
+        R(i, 6) = it(2) ' LIGNE PRODUIT
+
+        ' agrégats
+        R(i, 7) = it(4) ' Limite
+        R(i, 8) = it(5) ' Conso
+        R(i, 9) = it(6) ' Montant Sureté
+
+        ' Taux de couverture (attention : somme comme dans ton code)
+        ' si tu veux une moyenne pondérée, on peut l’ajuster
+        If it(7) <> 0 Then
+            R(i, 10) = it(7) & "%"
+        Else
+            R(i, 10) = 0
+        End If
+
+        ' Temp = Conso si pas de taux ; sinon Conso * Taux/100
+        Dim tempTech As Double
+        If Val(it(7)) <= 0 Then
+            tempTech = it(5)
+        Else
+            tempTech = Val(it(5)) * (Val(it(7)) / 100#)
+        End If
+        R(i, 11) = tempTech
+
+        ' Solde
+        R(i, 12) = NzD(R(i, 9)) + tempTech
+
+        ' Flag insuffisance
+        If Val(it(7)) <= 0 Then
+            R(i, 13) = IIf(R(i, 12) < 0, "Y", "N")
+        Else
+            R(i, 13) = IIf((NzD(R(i, 9)) + tempTech) < 0, "Y", "N")
+        End If
+
+        ' Blocage comptable (compteur>0 → afficher compteur)
+        If it(8) > 0 Then R(i, 14) = it(8)
+
+        i = i + 1
+    Next k
+
+    BuildResultArray = R
+End Function
+
+Private Function NzD(v As Variant) As Double
+    If IsEmpty(v) Or v = "" Then
+        NzD = 0#
+    Else
+        NzD = CDbl(v)
+    End If
+End Function
+
+
+# PW drill down
+
+Private Function BuildM_Single(ByVal csvPath As String, ByVal booking As String) As String
+    Dim m As String
+    m = _
+    "let" & vbCrLf & _
+    "    // ---------- Helpers ----------" & vbCrLf & _
+    "    ToNum = (x as any) as number =>" & vbCrLf & _
+    "        let" & vbCrLf & _
+    "            s = Text.From(x)," & vbCrLf & _
+    "            s1 = Text.Replace(s, "" "", """")," & vbCrLf & _
+    "            s2 = Text.Replace(s1, "","", ""."")," & vbCrLf & _
+    "            n  = try Number.From(s2) otherwise 0" & vbCrLf & _
+    "        in n," & vbCrLf & _
+    "" & vbCrLf & _
+    "    ToPct = (x as any) as number =>" & vbCrLf & _
+    "        let" & vbCrLf & _
+    "            s = Text.From(x)," & vbCrLf & _
+    "            s1 = Text.Replace(s, ""%"", """")," & vbCrLf & _
+    "            s2 = Text.Replace(s1, "","", ""."")," & vbCrLf & _
+    "            n  = try Number.From(s2) otherwise 0" & vbCrLf & _
+    "        in n," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // ---------- Source CSV ----------" & vbCrLf & _
+    "    Source = Csv.Document(File.Contents(""" & csvPath & """), [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+    "    H = Table.PromoteHeaders(Source, [PromoteAllScalars=true])," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Nettoyage léger colonnes texte (trim, apostrophes -> espace)" & vbCrLf & _
+    "    TrimCols = Table.TransformColumns(H," & vbCrLf & _
+    "        { {""MONTANT ENG/SUR"", each Text.Trim(Text.From(_)), type text}," & vbCrLf & _
+    "          {""MONTANT LIMITE"",  each Text.Trim(Text.From(_)), type text}," & vbCrLf & _
+    "          {""MONTANT MIN SURETE"", each Text.Trim(Text.From(_)), type text}," & vbCrLf & _
+    "          {""NO INTV PERE DU GRP RISQ"", each Text.Trim(Text.From(_)), type text}," & vbCrLf & _
+    "          {""LIBELLE TYPE DE SURETE"", each Text.Trim(Text.From(_)), type text}" & vbCrLf & _
+    "        })," & vbCrLf & _
+    "    CleanQuote = Table.ReplaceValue(TrimCols, ""'"", "" "", Replacer.ReplaceText," & vbCrLf & _
+    "        {""MONTANT ENG/SUR"", ""MONTANT LIMITE"", ""MONTANT MIN SURETE""})," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Ajout du Booking + Date de production (jj/MM/aaaa)" & vbCrLf & _
+    "    WithBooking = Table.AddColumn(CleanQuote, ""Booking"", each """ & booking & """, type text)," & vbCrLf & _
+    "    WithDate = Table.AddColumn(WithBooking, ""Production Date"", each Date.ToText(Date.From(DateTime.LocalNow()), ""dd/MM/yyyy""), type text)," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Garder NIVEAU=1" & vbCrLf & _
+    "    KeepL1 = Table.SelectRows(WithDate, each [NIVEAU] = ""1"")," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Séparer Lignes (L) et Suretés (S)" & vbCrLf & _
+    "    L_lines = Table.SelectRows(KeepL1, each [INDICATEUR LIGNE-SURETE] = ""L"")," & vbCrLf & _
+    "    S_lines = Table.SelectRows(KeepL1, each [INDICATEUR LIGNE-SURETE] = ""S"")," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Agrégats sur L (par NO DOSSIER CREDIT)" & vbCrLf & _
+    "    SumL = Table.Group(L_lines, {""NO DOSSIER CREDIT""}," & vbCrLf & _
+    "        {" & vbCrLf & _
+    "            {""Limite"", each List.Sum(List.Transform([MONTANT LIMITE], ToNum)), type number}," & vbCrLf & _
+    "            {""Consommation"", each List.Sum(List.Transform([MONTANT ENG/SUR], ToNum)), type number}," & vbCrLf & _
+    "            {""NO INTERVENANT"", each List.FirstN([NO INTERVENANT], 1){0}, type text}," & vbCrLf & _
+    "            {""NO INTV PERE DU GRP RISQ"", each List.Last(List.RemoveNulls([NO INTV PERE DU GRP RISQ])), type text}," & vbCrLf & _
+    "            {""LIGNE PRODUIT"", each List.Last(List.RemoveNulls([LIGNE PRODUIT])), type text}," & vbCrLf & _
+    "            {""Booking"", each List.FirstN([Booking], 1){0}, type text}," & vbCrLf & _
+    "            {""Production Date"", each List.FirstN([Production Date], 1){0}, type text}" & vbCrLf & _
+    "        })," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Agrégats sur S (par NO DOSSIER CREDIT)" & vbCrLf & _
+    "    SumS = Table.Group(S_lines, {""NO DOSSIER CREDIT""}," & vbCrLf & _
+    "        {" & vbCrLf & _
+    "            {""Montant Sureté"", each List.Sum(List.Transform([MONTANT ENG/SUR], ToNum)), type number}," & vbCrLf & _
+    "            {""Taux"", each List.Sum(List.Transform([TAUX SURETE EXIGE], ToPct)), type number}" & vbCrLf & _
+    "        })," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Blocage comptable par groupe (compteur de lignes libellées ""BLOCAGE CPTABLE"")" & vbCrLf & _
+    "    BlocGrp = Table.Group(" & vbCrLf & _
+    "        Table.SelectRows(KeepL1, each [LIBELLE TYPE DE SURETE] = ""BLOCAGE CPTABLE"")," & vbCrLf & _
+    "        {""NO INTV PERE DU GRP RISQ""}," & vbCrLf & _
+    "        {{""NbBloc"", each Table.RowCount(_), Int64.Type}})," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Join L + S" & vbCrLf & _
+    "    JoinLS = Table.NestedJoin(SumL, ""NO DOSSIER CREDIT"", SumS, ""NO DOSSIER CREDIT"", ""S"", JoinKind.LeftOuter)," & vbCrLf & _
+    "    ExpandS = Table.ExpandTableColumn(JoinLS, ""S"", {""Montant Sureté"", ""Taux""}, {""Montant Sureté"", ""Taux""})," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Temp = Consommation si Taux=0, sinon Consommation*(Taux/100)" & vbCrLf & _
+    "    AddTemp = Table.AddColumn(ExpandS, ""Temp"", each let c = [Consommation], t = if [Taux] = null then 0 else [Taux] in if t = 0 then c else c*(t/100.0), type number)," & vbCrLf & _
+    "    AddSolde = Table.AddColumn(AddTemp, ""Solde"", each [Montant Sureté] + [Temp], type number)," & vbCrLf & _
+    "    AddFlag  = Table.AddColumn(AddSolde, ""Flag insuffisance dossier"", each if [Solde] < 0 then ""Y"" else ""N"", type text)," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Join blocage par groupe (sur NO INTV PERE DU GRP RISQ)" & vbCrLf & _
+    "    JoinBloc = Table.NestedJoin(AddFlag, ""NO INTV PERE DU GRP RISQ"", BlocGrp, ""NO INTV PERE DU GRP RISQ"", ""B"", JoinKind.LeftOuter)," & vbCrLf & _
+    "    WithBloc = Table.ExpandTableColumn(JoinBloc, ""B"", {""NbBloc""}, {""Blocage comptable sur les group""})," & vbCrLf & _
+    "" & vbCrLf & _
+    "    // Colonnes finales dans l'ordre attendu" & vbCrLf & _
+    "    Final = Table.SelectColumns(WithBloc, {" & vbCrLf & _
+    "        ""Booking"", ""Production Date"", ""NO DOSSIER CREDIT"", ""NO INTERVENANT"", ""NO INTV PERE DU GRP RISQ"", ""LIGNE PRODUIT"", " & vbCrLf & _
+    "        ""Limite"", ""Consommation"", ""Montant Sureté"", ""Taux"", ""Temp"", ""Solde"", ""Flag insuffisance dossier"", ""Blocage comptable sur les group""" & vbCrLf & _
+    "    })" & vbCrLf & _
+    "in" & vbCrLf & _
+    "    Final"
+    BuildM_Single = m
+End Function
+
+
+# Autre
+
+' === Module: mod_import (refactor) =======================
+Option Explicit
+
+'--- Constantes ---
+Private Const SHEET_IMPORT As String = "DataImport"
+Private Const OLEDB_PQ As String = "OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;Location="
+Private Const CSV_DIR_ALL As String = "P:\EXPORTS_GESTION\Gateway\LVAL\Input_LLCR\"
+Private Const CSV_PREFIX As String = "LLCR_"
+Private Const CSV_EXT As String = ".csv"
+
+' Liste des bookings à agréger quand "_ALL"
+Private Function AllBookings() As Variant
+    ' SANS BEL A CE JOUR PLUS SUR S2I
+    AllBookings = Array("CAI", "CFM", "ESP", "HKG", "IND", "ITL", "LUX", "SNG")
+End Function
+
+' Locale par booking
+Private Function LocaleFor(booking As String) As String
+    If UCase$(booking) = "IND" Then
+        LocaleFor = "fr-FR"
+    Else
+        LocaleFor = "en-US"
+    End If
+End Function
+
+' Échappe les guillemets doubles dans un chemin pour l'injecter dans M
+Private Function MQuote(pathOrText As String) As String
+    MQuote = Replace(pathOrText, """", """""")
+End Function
+
+' S’assure qu’une feuille existe (sinon la crée)
+Private Function EnsureSheet(nameOrCreate As String) As Worksheet
+    On Error Resume Next
+    Set EnsureSheet = ThisWorkbook.Worksheets(nameOrCreate)
+    On Error GoTo 0
+    If EnsureSheet Is Nothing Then
+        Set EnsureSheet = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        EnsureSheet.Name = nameOrCreate
+    End If
+End Function
+
+' Supprime la requête & connexion associée si elles existent, sans toucher au reste
+Private Sub RemoveQueryIfExists(qName As String)
+    Dim q As WorkbookQuery
+    Dim cn As WorkbookConnection
+    On Error Resume Next
+
+    ' Supprimer le ListObject qui pointe dessus, sinon la connexion se recrée
+    Dim lo As ListObject, ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        For Each lo In ws.ListObjects
+            If lo.SourceType = xlSrcExternal Then
+                If InStr(1, CStr(lo.QueryTable.Connection), OLEDB_PQ & qName, vbTextCompare) > 0 Then
+                    lo.Delete
+                End If
+            End If
+        Next lo
+    Next ws
+
+    ' Supprime connexion portant Location = qName
+    For Each cn In ThisWorkbook.Connections
+        If InStr(1, cn.OLEDBConnection.Connection, OLEDB_PQ & qName, vbTextCompare) > 0 Then
+            cn.Delete
+        End If
+    Next cn
+
+    ' Supprime la query
+    For Each q In ThisWorkbook.Queries
+        If StrComp(q.Name, qName, vbTextCompare) = 0 Then
+            q.Delete
+            Exit For
+        End If
+    Next q
+
+    On Error GoTo 0
+End Sub
+
+' Construit le code M pour un booking unique
+Private Function BuildM_One(csvPath As String, booking As String) As String
+    Dim loc As String: loc = LocaleFor(booking)
+    BuildM_One = _
+        "let" & vbCrLf & _
+        "    Source = Csv.Document(File.Contents(""" & MQuote(csvPath) & """),[Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+        "    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true])," & vbCrLf & _
+        "    TrimmedText = Table.TransformColumns(PromotedHeaders, {{" & _
+            """MONTANT ENG/SUR"", each Text.Trim(_)}, {""MONTANT LIMITE"", each Text.Trim(_)}, {""MONTANT MIN SURETE"", each Text.Trim(_)}, {""NO INTV PERE DU GRP RISQ"", each Text.Trim(_)}, {""LIBELLE TYPE DE SURETE"", each Text.Trim(_)}})," & vbCrLf & _
+        "    ReplacedApostrophes = Table.ReplaceValue(TrimmedText, ""'"", "" "", Replacer.ReplaceText, {""MONTANT ENG/SUR"", ""MONTANT LIMITE"", ""MONTANT MIN SURETE""})," & vbCrLf & _
+        "    RemovedInnerSpaces = Table.TransformColumns(ReplacedApostrophes, {{" & _
+            """MONTANT ENG/SUR"", each Text.Replace(_, "" "", """")}, {""MONTANT LIMITE"", each Text.Replace(_, "" "", """")}, {""MONTANT MIN SURETE"", each Text.Replace(_, "" "", """")}})," & vbCrLf & _
+        "    Typed = Table.TransformColumnTypes(RemovedInnerSpaces, {{" & _
+            """MONTANT ENG/SUR"", type number}, {""MONTANT LIMITE"", type number}, {""MONTANT MIN SURETE"", type number}}, """ & loc & """)," & vbCrLf & _
+        "    AddedBooking = Table.AddColumn(Typed, ""Booking"", each """ & booking & """)" & vbCrLf & _
+        "in" & vbCrLf & _
+        "    AddedBooking"
+End Function
+
+' Construit le M combiné pour bookings ALL
+Private Function BuildM_All() As String
+    Dim arr As Variant: arr = AllBookings()
+    Dim i As Long, booking As String, loc As String
+    Dim lines As String, refs As String
+
+    lines = "let" & vbCrLf
+    For i = LBound(arr) To UBound(arr)
+        booking = CStr(arr(i))
+        loc = LocaleFor(booking)
+        lines = lines & _
+            "    Source" & booking & " = Csv.Document(File.Contents(""" & MQuote(CSV_DIR_ALL & CSV_PREFIX & booking & CSV_EXT) & """), [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+            "    PromotedHeaders" & booking & " = Table.PromoteHeaders(Source" & booking & ", [PromoteAllScalars=true])," & vbCrLf & _
+            "    TrimmedText" & booking & " = Table.TransformColumns(PromotedHeaders" & booking & ", {{" & _
+                """MONTANT ENG/SUR"", each Text.Trim(_)}, {""MONTANT LIMITE"", each Text.Trim(_)}, {""MONTANT MIN SURETE"", each Text.Trim(_)}, {""NO INTV PERE DU GRP RISQ"", each Text.Trim(_)}, {""LIBELLE TYPE DE SURETE"", each Text.Trim(_)}})," & vbCrLf & _
+            "    ReplacedApostrophes" & booking & " = Table.ReplaceValue(TrimmedText" & booking & ", ""'"", "" "", Replacer.ReplaceText, {""MONTANT ENG/SUR"", ""MONTANT LIMITE"", ""MONTANT MIN SURETE""})," & vbCrLf & _
+            "    RemovedInnerSpaces" & booking & " = Table.TransformColumns(ReplacedApostrophes" & booking & ", {{" & _
+                """MONTANT ENG/SUR"", each Text.Replace(_, "" "", """")}, {""MONTANT LIMITE"", each Text.Replace(_, "" "", """")}, {""MONTANT MIN SURETE"", each Text.Replace(_, "" "", """")}})," & vbCrLf & _
+            "    Typed" & booking & " = Table.TransformColumnTypes(RemovedInnerSpaces" & booking & ", {{" & _
+                """MONTANT ENG/SUR"", type number}, {""MONTANT LIMITE"", type number}, {""MONTANT MIN SURETE"", type number}}, """ & loc & """)," & vbCrLf & _
+            "    AddedBooking" & booking & " = Table.AddColumn(Typed" & booking & ", ""Booking"", each """ & booking & """)," & vbCrLf
+        refs = refs & "AddedBooking" & booking & ","
+    Next i
+    If Len(refs) > 0 Then refs = Left$(refs, Len(refs) - 1)
+
+    BuildM_All = lines & _
+        "    CombinedTables = Table.Combine({" & refs & "})" & vbCrLf & _
+        "in" & vbCrLf & _
+        "    CombinedTables"
+End Function
+
+' Crée/Met à jour la requête et charge dans un ListObject sur SHEET_IMPORT!A1
+Private Sub CreateLoadTable(qName As String, mFormula As String)
+    Dim ws As Worksheet
+    Dim dest As Range
+
+    ' Supprime l’ancienne query/connexion/table si existantes
+    RemoveQueryIfExists qName
+
+    ' Crée la query
+    ThisWorkbook.Queries.Add Name:=qName, Formula:=mFormula
+
+    ' Feuille + cellule destination
+    Set ws = EnsureSheet(SHEET_IMPORT)
+    Set dest = ws.Range("A1")
+
+    ' Ajoute ListObject relié à la query
+    Dim qt As QueryTable
+    Dim lo As ListObject
+    Set qt = ws.ListObjects.Add( _
+            SourceType:=0, _
+            Source:=OLEDB_PQ & qName & ";Extended Properties=""""" _
+            , Destination:=dest).QueryTable
+
+    With qt
+        .CommandType = xlCmdSql
+        .CommandText = Array("SELECT * FROM [" & qName & "]")
+        .AdjustColumnWidth = True
+        .PreserveColumnInfo = True
+        .Refresh BackgroundQuery:=False
+    End With
+End Sub
+
+' === API principale ===
+Public Sub ImportCSVToTablePowerQuery(ByVal csvPath As String)
+    Dim appCalc As XlCalculation
+    Dim scrUp As Boolean, evt As Boolean
+    Dim fileName As String, extracted As String, booking As String
+    Dim qName As String, m As String
+    Dim isAll As Boolean
+
+    ' Accélération
+    appCalc = Application.Calculation
+    scrUp = Application.ScreenUpdating
+    evt = Application.EnableEvents
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo CleanFail
+
+    ' Ex: "...\LLCR_BEL.csv" -> "LLCR_BEL"
+    fileName = Mid$(csvPath, InStrRev(csvPath, "\") + 1)
+    extracted = Left$(fileName, InStrRev(fileName, ".") - 1)
+    qName = extracted
+    booking = Split(extracted, "_")(1)
+    isAll = (UCase$(booking) = "ALL")
+
+    If isAll Then
+        m = BuildM_All()
+    Else
+        m = BuildM_One(csvPath, booking)
+    End If
+
+    CreateLoadTable qName, m
+
+    ' Cache le volet Requêtes & connexions s’il est ouvert (silencieusement)
+    On Error Resume Next
+    Application.CommandBars("Queries and Connections").Visible = False
+    On Error GoTo 0
+
+CleanExit:
+    Application.ScreenUpdating = scrUp
+    Application.EnableEvents = evt
+    Application.Calculation = appCalc
+    Exit Sub
+
+CleanFail:
+    ' Restaure l’état et trace l’erreur
+    Debug.Print "ImportCSVToTablePowerQuery error: "; Err.Number; " - "; Err.Description
+    MsgBox "Erreur lors de l'import : " & Err.Description, vbExclamation
+    Resume CleanExit
+End Sub
+
+' === Fonctions utilitaires conservées / nettoyées ==========
+
+' Remplace la copie par assignation directe (plus rapide)
+Public Sub ImportCSVData(ByVal pathImport As String, ByVal wsDataImport As Worksheet)
+    Dim wsData As Worksheet
+    Dim lastRow As Long, lastCol As Long
+
+    Set wsData = EnsureSheet(SHEET_IMPORT)
+
+    With wsDataImport
+        lastRow = .Cells(.Rows.Count, 1).End(xlUp).Row
+        lastCol = .Cells(1, .Columns.Count).End(xlToLeft).Column
+        wsData.Range("A1").Resize(lastRow, lastCol).Value = _
+            .Range(.Cells(1, 1), .Cells(lastRow, lastCol)).Value
+    End With
+
+    ' Si un classeur CSV a été ouvert ailleurs : on évite FSO, on ferme via Workbooks si présent
+    Dim wbName As String
+    wbName = Dir$(pathImport)
+    On Error Resume Next
+    If LenB(wbName) > 0 Then
+        Workbooks(wbName).Close SaveChanges:=False
+    End If
+    On Error GoTo 0
+End Sub
+
+Public Sub SelectFolderInput()
+    ' La fonction FctSelectFolder n’est pas définie ici ; on suppose qu’elle existe dans le projet
+    Call FctSelectFolder(ws_main.Name, "RngMainPathFolder")
+End Sub
+
+' Crée/Nettoie une feuille (NoDel = True => ne pas supprimer la feuille, juste Clear)
+Public Function CreateNewSht(ByVal sheetName As String, Optional ByVal NoDel As Boolean)
+    Dim ws As Worksheet
+    If NoDel Then
+        If SheetExists(sheetName) Then
+            ThisWorkbook.Sheets(sheetName).Cells.Clear
+            Exit Function
+        End If
+    End If
+
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    ThisWorkbook.Worksheets(sheetName).Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+
+    Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(1))
+    ws.Name = sheetName
+End Function
+
+' Helper d’existence de feuille
+Private Function SheetExists(ByVal sheetName As String) As Boolean
+    On Error Resume Next
+    SheetExists = Not ThisWorkbook.Worksheets(sheetName) Is Nothing
+    On Error GoTo 0
+End Function
+' ==========================================================
+
+# autre best
+
+' === Module: mod_import (PQ optimisé) =====================
+Option Explicit
+
+'--- Constantes ---
+Private Const SHEET_IMPORT As String = "DataImport"
+Private Const OLEDB_PQ As String = "OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;Location="
+Private Const CSV_DIR_ALL As String = "P:\EXPORTS_GESTION\Gateway\LVAL\Input_LLCR\"
+Private Const CSV_PREFIX As String = "LLCR_"
+Private Const CSV_EXT As String = ".csv"
+
+' ================== LISTES & HELPERS =====================
+
+' Liste des bookings à agréger quand "_ALL"
+Private Function AllBookings() As Variant
+    ' SANS BEL A CE JOUR PLUS SUR S2I
+    AllBookings = Array("CAI", "CFM", "ESP", "HKG", "IND", "ITL", "LUX", "SNG")
+End Function
+
+' Échappe les guillemets doubles pour l’injection dans M
+Private Function MQuote(ByVal s As String) As String
+    MQuote = Replace(s, """", """""")
+End Function
+
+' S’assure qu’une feuille existe (sinon la crée)
+Private Function EnsureSheet(nameOrCreate As String) As Worksheet
+    On Error Resume Next
+    Set EnsureSheet = ThisWorkbook.Worksheets(nameOrCreate)
+    On Error GoTo 0
+    If EnsureSheet Is Nothing Then
+        Set EnsureSheet = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        EnsureSheet.Name = nameOrCreate
+    End If
+End Function
+
+' Supprime la requête/connexion/table ciblée si existantes (sans toucher au reste)
+Private Sub RemoveQueryIfExists(qName As String)
+    Dim q As WorkbookQuery
+    Dim cn As WorkbookConnection
+    Dim ws As Worksheet, lo As ListObject
+    On Error Resume Next
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each lo In ws.ListObjects
+            If lo.SourceType = xlSrcExternal Then
+                If InStr(1, CStr(lo.QueryTable.Connection), OLEDB_PQ & qName, vbTextCompare) > 0 Then
+                    lo.Delete
+                End If
+            End If
+        Next lo
+    Next ws
+
+    For Each cn In ThisWorkbook.Connections
+        If InStr(1, cn.OLEDBConnection.Connection, OLEDB_PQ & qName, vbTextCompare) > 0 Then
+            cn.Delete
+        End If
+    Next cn
+
+    For Each q In ThisWorkbook.Queries
+        If StrComp(q.Name, qName, vbTextCompare) = 0 Then
+            q.Delete
+            Exit For
+        End If
+    Next q
+    On Error GoTo 0
+End Sub
+
+' ================= CONSTRUCTEURS DE M ====================
+
+' --- M optimisé pour un seul CSV ---
+Private Function BuildM_One(ByVal csvPath As String, ByVal booking As String) As String
+    Dim m As String
+    m = _
+    "let" & vbCrLf & _
+    "    CsvPath   = """ & MQuote(csvPath) & """," & vbCrLf & _
+    "    Booking   = """ & MQuote(booking) & """," & vbCrLf & _
+    "    Culture   = if Booking = ""IND"" then ""fr-FR"" else ""en-US""," & vbCrLf & _
+    "    NumCols   = {""MONTANT ENG/SUR"",""MONTANT LIMITE"",""MONTANT MIN SURETE""}," & vbCrLf & _
+    "    SourceBin = Binary.Buffer(File.Contents(CsvPath))," & vbCrLf & _
+    "    Source    = Csv.Document(SourceBin, [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+    "    Promoted  = Table.PromoteHeaders(Source)," & vbCrLf & _
+    "    CleanedTyped = Table.TransformColumns(" & vbCrLf & _
+    "        Promoted," & vbCrLf & _
+    "        List.Transform(" & vbCrLf & _
+    "            NumCols," & vbCrLf & _
+    "            (c) => { c," & vbCrLf & _
+    "                     (v) => Number.FromText(Text.Remove(Text.Trim(Text.From(v)), {"" "",""'"") , Culture)," & vbCrLf & _
+    "                     type number }" & vbCrLf & _
+    "        )" & vbCrLf & _
+    "    )," & vbCrLf & _
+    "    WithBooking = Table.AddColumn(CleanedTyped, ""Booking"", each Booking, type text)" & vbCrLf & _
+    "in" & vbCrLf & _
+    "    WithBooking"
+    BuildM_One = m
+End Function
+
+' --- M optimisé pour ALL (List.Transform + fonction) ---
+Private Function BuildM_All() As String
+    Dim arr As Variant, i As Long, listTxt As String
+    arr = AllBookings()
+    For i = LBound(arr) To UBound(arr)
+        listTxt = listTxt & """" & MQuote(CStr(arr(i))) & ""","
+    Next i
+    If Len(listTxt) > 0 Then listTxt = Left$(listTxt, Len(listTxt) - 1)
+
+    Dim m As String
+    m = _
+    "let" & vbCrLf & _
+    "    Bookings  = {" & listTxt & "}," & vbCrLf & _
+    "    NumCols   = {""MONTANT ENG/SUR"",""MONTANT LIMITE"",""MONTANT MIN SURETE""}," & vbCrLf & _
+    "    BaseDir   = """ & MQuote(CSV_DIR_ALL) & """," & vbCrLf & _
+    "    CultureOf = (b as text) as text => if b = ""IND"" then ""fr-FR"" else ""en-US""," & vbCrLf & _
+    "    TransformBooking = (b as text) as table =>" & vbCrLf & _
+    "        let" & vbCrLf & _
+    "            Path      = BaseDir & """ & MQuote(CSV_PREFIX) & """ & b & """ & MQuote(CSV_EXT) & """," & vbCrLf & _
+    "            Bin       = Binary.Buffer(File.Contents(Path))," & vbCrLf & _
+    "            Src       = Csv.Document(Bin, [Delimiter="";"", Encoding=1252, QuoteStyle=QuoteStyle.None])," & vbCrLf & _
+    "            Promoted  = Table.PromoteHeaders(Src)," & vbCrLf & _
+    "            CleanType = Table.TransformColumns(" & vbCrLf & _
+    "                           Promoted," & vbCrLf & _
+    "                           List.Transform(" & vbCrLf & _
+    "                               NumCols," & vbCrLf & _
+    "                               (c) => { c," & vbCrLf & _
+    "                                        (v) => Number.FromText(Text.Remove(Text.Trim(Text.From(v)), {"" "",""'"") , CultureOf(b))," & vbCrLf & _
+    "                                        type number }" & vbCrLf & _
+    "                           )" & vbCrLf & _
+    "                        )," & vbCrLf & _
+    "            WithBk    = Table.AddColumn(CleanType, ""Booking"", each b, type text)" & vbCrLf & _
+    "        in" & vbCrLf & _
+    "            WithBk," & vbCrLf & _
+    "    Tables   = List.Transform(Bookings, each TransformBooking(_))," & vbCrLf & _
+    "    TablesB  = List.Transform(Tables, each Table.Buffer(_))," & vbCrLf & _
+    "    Combined = Table.Combine(TablesB)" & vbCrLf & _
+    "in" & vbCrLf & _
+    "    Combined"
+    BuildM_All = m
+End Function
+
+' ============== CREATION & CHARGEMENT TABLE ==============
+
+' Crée/Met à jour la requête et charge dans un ListObject sur SHEET_IMPORT!A1
+Private Sub CreateLoadTable(qName As String, mFormula As String)
+    Dim ws As Worksheet
+    Dim dest As Range
+    Dim qt As QueryTable
+
+    RemoveQueryIfExists qName
+
+    ThisWorkbook.Queries.Add Name:=qName, Formula:=mFormula
+
+    Set ws = EnsureSheet(SHEET_IMPORT)
+    Set dest = ws.Range("A1")
+
+    Set qt = ws.ListObjects.Add( _
+                SourceType:=0, _
+                Source:=OLEDB_PQ & qName & ";Extended Properties=""""" _
+                , Destination:=dest).QueryTable
+
+    With qt
+        .CommandType = xlCmdSql
+        .CommandText = Array("SELECT * FROM [" & qName & "]")
+        .AdjustColumnWidth = True
+        .PreserveColumnInfo = True
+        .Refresh BackgroundQuery:=False
+    End With
+End Sub
+
+' ===================== API PRINCIPALE =====================
+
+Public Sub ImportCSVToTablePowerQuery(ByVal csvPath As String)
+    Dim appCalc As XlCalculation
+    Dim scrUp As Boolean, evt As Boolean
+    Dim fileName As String, extracted As String, booking As String
+    Dim qName As String, m As String
+    Dim isAll As Boolean
+
+    ' Accélération Excel
+    appCalc = Application.Calculation
+    scrUp = Application.ScreenUpdating
+    evt = Application.EnableEvents
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo CleanFail
+
+    ' Ex: "...\LLCR_BEL.csv" -> "LLCR_BEL"
+    fileName = Mid$(csvPath, InStrRev(csvPath, "\") + 1)
+    extracted = Left$(fileName, InStrRev(fileName, ".") - 1)
+    qName = extracted
+    booking = Split(extracted, "_")(1)
+    isAll = (UCase$(booking) = "ALL")
+
+    If isAll Then
+        m = BuildM_All()
+    Else
+        m = BuildM_One(csvPath, booking)
+    End If
+
+    CreateLoadTable qName, m
+
+    On Error Resume Next
+    Application.CommandBars("Queries and Connections").Visible = False
+    On Error GoTo 0
+
+CleanExit:
+    Application.ScreenUpdating = scrUp
+    Application.EnableEvents = evt
+    Application.Calculation = appCalc
+    Exit Sub
+
+CleanFail:
+    Debug.Print "ImportCSVToTablePowerQuery error: "; Err.Number; " - "; Err.Description
+    MsgBox "Erreur lors de l'import : " & Err.Description, vbExclamation
+    Resume CleanExit
+End Sub
+
+' ================== FONCTIONS ANNEXES =====================
+
+' Copie par assignation (plus rapide que Copy/Paste)
+Public Sub ImportCSVData(ByVal pathImport As String, ByVal wsDataImport As Worksheet)
+    Dim wsData As Worksheet
+    Dim lastRow As Long, lastCol As Long
+
+    Set wsData = EnsureSheet(SHEET_IMPORT)
+
+    With wsDataImport
+        lastRow = .Cells(.Rows.Count, 1).End(xlUp).Row
+        lastCol = .Cells(1, .Columns.Count).End(xlToLeft).Column
+        wsData.Range("A1").Resize(lastRow, lastCol).Value = _
+            .Range(.Cells(1, 1), .Cells(lastRow, lastCol)).Value
+    End With
+
+    ' Ferme le classeur CSV si ouvert
+    Dim wbName As String
+    wbName = Dir$(pathImport)
+    On Error Resume Next
+    If LenB(wbName) > 0 Then Workbooks(wbName).Close SaveChanges:=False
+    On Error GoTo 0
+End Sub
+
+Public Sub SelectFolderInput()
+    ' Suppose que FctSelectFolder/ws_main existent dans votre projet
+    Call FctSelectFolder(ws_main.Name, "RngMainPathFolder")
+End Sub
+
+' Crée/Nettoie une feuille (NoDel=True => on garde la feuille, on la Clear)
+Public Function CreateNewSht(ByVal sheetName As String, Optional ByVal NoDel As Boolean)
+    Dim ws As Worksheet
+    If NoDel Then
+        If SheetExists(sheetName) Then
+            ThisWorkbook.Sheets(sheetName).Cells.Clear
+            Exit Function
+        End If
+    End If
+
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    ThisWorkbook.Worksheets(sheetName).Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+
+    Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Sheets(1))
+    ws.Name = sheetName
+End Function
+
+Private Function SheetExists(ByVal sheetName As String) As Boolean
+    On Error Resume Next
+    SheetExists = Not ThisWorkbook.Worksheets(sheetName) Is Nothing
+    On Error GoTo 0
+End Function
+' =========================================================
