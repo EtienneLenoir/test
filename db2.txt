@@ -1,0 +1,627 @@
+Parfait — on ajuste le modèle pour que l’unicité soit (BookingCode, NoDossier) (puisque le même numéro de dossier peut exister sur plusieurs “Bookings”).
+Voici la version corrigée : champs, relations, et les morceaux de VBA/DDL à remplacer.
+
+Schéma cible (mis à jour)
+dim_Booking
+
+BookingCode — PK (Texte 10)
+
+BookingLabel — Texte 100
+
+dim_Dossier (portée par Booking)
+
+BookingCode — partie de PK (FK → dim_Booking.BookingCode)
+
+NoDossier — partie de PK
+
+NoIntervenant — Texte 50
+
+NoIntervenantGrp — Texte 50
+
+Ligne — Texte 50
+PK composite: (BookingCode, NoDossier)
+Index utiles: NoIntervenant, NoIntervenantGrp
+
+fact_FluxDaily
+
+FluxID — AutoNumber, PK
+
+ProductionDate — Date/Heure
+
+BookingCode — Texte 10
+
+NoDossier — Texte 50
+
+Limite, Consommation, MontantSurete, TauxCouvertureVG — Numériques
+
+InsuffisanceMontant (Double), DepassementFlag (Oui/Non), DecouvertNonAutoriseFlag (Oui/Non), CouvertureManquante (Double, option)
+
+LoadTS — Date/Heure
+FK composite: (BookingCode, NoDossier) → dim_Dossier
+Index unique anti-doublon: (ProductionDate, BookingCode, NoDossier)
+Index: ProductionDate, BookingCode, NoDossier, DepassementFlag
+
+dep_DepassementPeriod
+
+PeriodID — AutoNumber, PK
+
+BookingCode, NoDossier — FK composite → dim_Dossier
+
+DateBegin, DateEnd (Null si en cours), NbDays
+
+MaxInsuffisance, MaxDateInsuf
+
+CommentaireRisque, CommentaireFront (LongText)
+
+LastUpdated
+Index: (BookingCode, NoDossier, DateEnd), DateEnd
+
+dep_DepassementPeriod_Archive (legacy)
+
+Même schéma/Index que dep_DepassementPeriod
+
+stg_Excel (staging)
+
+Bookings, ProductionDate, NO_DOSSIER_CREDIT, NO_INTERVENANT, NO_INTERVENANT_GRP, Ligne, Limite, Consommation, MontantSurete, TauxCouvertureVG
+
+Relations (cardinalités)
+
+dim_Booking.BookingCode 1→n dim_Dossier.BookingCode
+
+dim_Dossier(BookingCode, NoDossier) 1→n fact_FluxDaily(BookingCode, NoDossier)
+
+dim_Dossier(BookingCode, NoDossier) 1→n dep_DepassementPeriod(BookingCode, NoDossier)
+
+Intégrité référentielle
+
+Activer IR + Update Cascade sur les 3 FKs ci-dessus (Delete Cascade = OFF).
+
+ERD (ASCII)
+
+dim_Booking [PK BookingCode] ──┐
+                               └─< dim_Dossier [PK (BookingCode, NoDossier)] >─┐
+                                                                                ├─< fact_FluxDaily
+                                                                                └─< dep_DepassementPeriod ──(archive)→ dep_DepassementPeriod_Archive
+
+DDL Access (remplacements clés)
+Créer dim_Dossier avec PK composite
+CurrentDb.Execute _
+"CREATE TABLE dim_Dossier (" & _
+" BookingCode TEXT(10) NOT NULL," & _
+" NoDossier   TEXT(50) NOT NULL," & _
+" NoIntervenant TEXT(50)," & _
+" NoIntervenantGrp TEXT(50)," & _
+" Ligne TEXT(50)," & _
+" CONSTRAINT PK_dim_Dossier PRIMARY KEY (BookingCode, NoDossier)," & _
+" CONSTRAINT FK_dimDossier_Booking FOREIGN KEY (BookingCode) REFERENCES dim_Booking(BookingCode)" & _
+");", dbFailOnError
+
+Adapter fact_FluxDaily et ses contraintes
+CurrentDb.Execute _
+"CREATE TABLE fact_FluxDaily (" & _
+" FluxID AUTOINCREMENT PRIMARY KEY," & _
+" ProductionDate DATETIME," & _
+" BookingCode TEXT(10) NOT NULL," & _
+" NoDossier   TEXT(50) NOT NULL," & _
+" Limite DOUBLE, Consommation DOUBLE, MontantSurete DOUBLE, TauxCouvertureVG DOUBLE," & _
+" InsuffisanceMontant DOUBLE, DepassementFlag YESNO, DecouvertNonAutoriseFlag YESNO, CouvertureManquante DOUBLE," & _
+" LoadTS DATETIME," & _
+" CONSTRAINT FK_Flux_Dossier FOREIGN KEY (BookingCode, NoDossier)" & _
+"   REFERENCES dim_Dossier(BookingCode, NoDossier)" & _
+");", dbFailOnError
+
+' index unique anti-doublon
+CurrentDb.Execute _
+"CREATE UNIQUE INDEX IX_Flux_Key ON fact_FluxDaily(ProductionDate, BookingCode, NoDossier);", dbFailOnError
+
+Adapter dep_DepassementPeriod
+CurrentDb.Execute _
+"CREATE TABLE dep_DepassementPeriod (" & _
+" PeriodID AUTOINCREMENT PRIMARY KEY," & _
+" BookingCode TEXT(10) NOT NULL," & _
+" NoDossier   TEXT(50) NOT NULL," & _
+" DateBegin DATETIME, DateEnd DATETIME, NbDays LONG," & _
+" MaxInsuffisance DOUBLE, MaxDateInsuf DATETIME," & _
+" CommentaireRisque MEMO, CommentaireFront MEMO, LastUpdated DATETIME," & _
+" CONSTRAINT FK_Dep_Dossier FOREIGN KEY (BookingCode, NoDossier)" & _
+"   REFERENCES dim_Dossier(BookingCode, NoDossier)" & _
+");", dbFailOnError
+
+CurrentDb.Execute "CREATE INDEX IX_Dep_Booking_NoDossier_DateEnd ON dep_DepassementPeriod(BookingCode, NoDossier, DateEnd);", dbFailOnError
+CurrentDb.Execute "CREATE INDEX IX_Dep_DateEnd ON dep_DepassementPeriod(DateEnd);", dbFailOnError
+
+
+(Créer dep_DepassementPeriod_Archive à l’identique.)
+
+Ajustements VBA (import/upsert)
+Upsert référentiels (tenir compte de la portée Booking + NoDossier)
+' dim_Booking (inchangé)
+CurrentDb.Execute _
+"INSERT INTO dim_Booking(BookingCode) " & _
+"SELECT DISTINCT s.Bookings FROM stg_Excel s " & _
+"WHERE s.Bookings IS NOT NULL " & _
+"  AND NOT EXISTS (SELECT 1 FROM dim_Booking b WHERE b.BookingCode = s.Bookings);", dbFailOnError
+
+' dim_Dossier (clé composite)
+CurrentDb.Execute _
+"INSERT INTO dim_Dossier(BookingCode, NoDossier, NoIntervenant, NoIntervenantGrp, Ligne) " & _
+"SELECT DISTINCT s.Bookings, s.NO_DOSSIER_CREDIT, s.NO_INTERVENANT, s.NO_INTERVENANT_GRP, s.Ligne " & _
+"FROM stg_Excel s " & _
+"WHERE s.Bookings IS NOT NULL AND s.NO_DOSSIER_CREDIT IS NOT NULL " & _
+"  AND NOT EXISTS (" & _
+"     SELECT 1 FROM dim_Dossier d " & _
+"     WHERE d.BookingCode = s.Bookings AND d.NoDossier = s.NO_DOSSIER_CREDIT" & _
+");", dbFailOnError
+
+Append vers fact_FluxDaily (joins déjà sur les deux clés — OK)
+
+(Le SQL d’insert que je t’ai donné fonctionne déjà avec BookingCode + NoDossier.)
+
+Moteur de périodes
+
+Les requêtes INSERT/UPDATE dep_DepassementPeriod joignent déjà sur BookingCode et NoDossier → rien à changer.
+
+Petites conséquences côté requêtes
+
+Partout, filtre/agrège par BookingCode + NoDossier (et non par NoDossier seul).
+
+Si tu affiches des listes de dossiers, inclure BookingCode pour lever toute ambiguïté.
+
+Si tu veux, je te prépare un module “CreateSchema()” complet qui reconstruira ce schéma (PK composites + FKs) et mettra à jour les requêtes prêtes à l’emploi.
+
+
+
+##
+
+
+Parfait — voici un package VBA complet (à coller dans Access) qui :
+
+met à jour la base (import Excel du jour, upsert référentiels, append flux, mise à jour des périodes),
+
+génère un classeur Excel avec deux feuilles :
+
+Daily_Reporting (stock actuel, découverts non autorisés, résumé par place)
+
+Statistics (historique clôturé, top dossiers, agrégats 30/90 jours)
+
+Il respecte la clé métier (BookingCode, NoDossier).
+
+⚙️ Hypothèses : vos tables portent les noms et colonnes décrits précédemment. Remplacez Feuil1 si besoin, et adaptez les chemins de fichiers.
+
+1) Paramètres & Helpers
+'=== Module: modConfig ===
+Option Compare Database
+Option Explicit
+
+Public Const SHEET_NAME As String = "Feuil1" ' feuille Excel source
+Public Const HAS_HEADERS As Boolean = True
+
+Public Function SafeDMax(ByVal expr As String, ByVal domain As String) As Variant
+    On Error GoTo EH
+    SafeDMax = DMax(expr, domain)
+    Exit Function
+EH:
+    SafeDMax = Null
+End Function
+
+Public Function LatestProdDate() As Date
+    Dim v As Variant
+    v = SafeDMax("ProductionDate", "fact_FluxDaily")
+    If IsNull(v) Then
+        LatestProdDate = Date
+    Else
+        LatestProdDate = CDate(v)
+    End If
+End Function
+
+2) Import Excel → staging → flux + référentiels
+
+(identique au design précédent, juste rappel ici pour que tout soit “plug & play”)
+
+'=== Module: modImport ===
+Option Compare Database
+Option Explicit
+
+Public Sub ImporterFlux(ByVal fullPath As String)
+    ' 1) vider staging
+    CurrentDb.Execute "DELETE FROM stg_Excel;", dbFailOnError
+
+    ' 2) importer Excel brut
+    DoCmd.TransferSpreadsheet _
+        TransferType:=acImport, _
+        SpreadsheetType:=acSpreadsheetTypeExcel12Xml, _
+        TableName:="stg_Excel", _
+        FileName:=fullPath, _
+        HasFieldNames:=HAS_HEADERS, _
+        Range:=SHEET_NAME & "$"
+
+    ' 3) upsert dim_Booking
+    CurrentDb.Execute _
+      "INSERT INTO dim_Booking(BookingCode) " & _
+      "SELECT DISTINCT s.Bookings FROM stg_Excel s " & _
+      "WHERE s.Bookings IS NOT NULL " & _
+      "  AND NOT EXISTS (SELECT 1 FROM dim_Booking b WHERE b.BookingCode = s.Bookings);", dbFailOnError
+
+    ' 4) upsert dim_Dossier (clé composite Booking+NoDossier)
+    CurrentDb.Execute _
+      "INSERT INTO dim_Dossier(BookingCode, NoDossier, NoIntervenant, NoIntervenantGrp, Ligne) " & _
+      "SELECT DISTINCT s.Bookings, s.NO_DOSSIER_CREDIT, s.NO_INTERVENANT, s.NO_INTERVENANT_GRP, s.Ligne " & _
+      "FROM stg_Excel s " & _
+      "WHERE s.Bookings IS NOT NULL AND s.NO_DOSSIER_CREDIT IS NOT NULL " & _
+      "  AND NOT EXISTS (" & _
+      "     SELECT 1 FROM dim_Dossier d " & _
+      "     WHERE d.BookingCode = s.Bookings AND d.NoDossier = s.NO_DOSSIER_CREDIT" & _
+      ");", dbFailOnError
+
+    ' 5) append vers fact_FluxDaily (évite doublons jour/place/dossier)
+    Dim sqlAppend As String
+    sqlAppend = _
+      "INSERT INTO fact_FluxDaily (" & _
+      "ProductionDate, BookingCode, NoDossier, Limite, Consommation, MontantSurete, TauxCouvertureVG, " & _
+      "InsuffisanceMontant, DepassementFlag, DecouvertNonAutoriseFlag, CouvertureManquante, LoadTS) " & _
+      "SELECT s.ProductionDate, s.Bookings, s.NO_DOSSIER_CREDIT, " & _
+      "       Nz(s.Limite,0), Nz(s.Consommation,0), Nz(s.MontantSurete,0), Nz(s.TauxCouvertureVG,0), " & _
+      "       IIF(Nz(s.Consommation,0) - Nz(s.Limite,0) > 0, Nz(s.Consommation,0)-Nz(s.Limite,0), 0) AS Insuf, " & _
+      "       IIF(Nz(s.Consommation,0) - Nz(s.Limite,0) > 0, TRUE, FALSE) AS DepFlag, " & _
+      "       IIF(Nz(s.Limite,0)=0 AND Nz(s.Consommation,0)>0, TRUE, FALSE) AS DNAFlag, " & _
+      "       IIF(Nz(s.Consommation,0) - Nz(s.MontantSurete,0)*Nz(s.TauxCouvertureVG,0) > 0, Nz(s.Consommation,0) - Nz(s.MontantSurete,0)*Nz(s.TauxCouvertureVG,0), 0) AS CouvManq, " & _
+      "       Now() AS LoadTS " & _
+      "FROM stg_Excel s " & _
+      "LEFT JOIN fact_FluxDaily f ON f.ProductionDate = s.ProductionDate " & _
+      "  AND f.BookingCode = s.Bookings " & _
+      "  AND f.NoDossier = s.NO_DOSSIER_CREDIT " & _
+      "WHERE f.FluxID IS NULL;"
+    CurrentDb.Execute sqlAppend, dbFailOnError
+
+    ' 6) mise à jour des périodes (utilise la date la plus récente importée)
+    Call MajPeriodesDepassement(CDate(DMax("ProductionDate", "fact_FluxDaily")))
+End Sub
+
+'=== Module: modDepassement ===
+Option Compare Database
+Option Explicit
+
+Public Sub MajPeriodesDepassement(ByVal dJour As Date)
+    Dim qOpen As String, qUpdateMax As String, qClose As String
+
+    ' Ouvrir une période si dépassement aujourd'hui et pas de période ouverte
+    qOpen = _
+      "INSERT INTO dep_DepassementPeriod (BookingCode, NoDossier, DateBegin, MaxInsuffisance, MaxDateInsuf, LastUpdated) " & _
+      "SELECT f.BookingCode, f.NoDossier, f.ProductionDate, f.InsuffisanceMontant, f.ProductionDate, Now() " & _
+      "FROM fact_FluxDaily f " & _
+      "LEFT JOIN (" & _
+      "   SELECT BookingCode, NoDossier FROM dep_DepassementPeriod WHERE DateEnd IS NULL" & _
+      ") p ON p.BookingCode=f.BookingCode AND p.NoDossier=f.NoDossier " & _
+      "WHERE f.ProductionDate = #" & Format(dJour, "yyyy-mm-dd") & "# " & _
+      "  AND f.DepassementFlag=True " & _
+      "  AND p.NoDossier IS NULL;"
+    CurrentDb.Execute qOpen, dbFailOnError
+
+    ' Mettre à jour max si période déjà ouverte
+    qUpdateMax = _
+      "UPDATE dep_DepassementPeriod AS p " & _
+      "INNER JOIN fact_FluxDaily AS f " & _
+      "  ON f.BookingCode=p.BookingCode AND f.NoDossier=p.NoDossier " & _
+      "SET p.MaxInsuffisance = IIF(f.InsuffisanceMontant > p.MaxInsuffisance, f.InsuffisanceMontant, p.MaxInsuffisance), " & _
+      "    p.MaxDateInsuf = IIF(f.InsuffisanceMontant > p.MaxInsuffisance, f.ProductionDate, p.MaxDateInsuf), " & _
+      "    p.LastUpdated = Now() " & _
+      "WHERE p.DateEnd IS NULL AND f.ProductionDate=#" & Format(dJour, "yyyy-mm-dd") & "# AND f.DepassementFlag=True;"
+    CurrentDb.Execute qUpdateMax, dbFailOnError
+
+    ' Fermer les périodes si aujourd'hui pas de dépassement
+    qClose = _
+      "UPDATE dep_DepassementPeriod AS p " & _
+      "SET p.DateEnd = DATEADD('d', -1, #" & Format(dJour, "yyyy-mm-dd") & "#), " & _
+      "    p.NbDays = DATEDIFF('d', p.DateBegin, DATEADD('d', -1, #" & Format(dJour, "yyyy-mm-dd") & "#)) + 1, " & _
+      "    p.LastUpdated = Now() " & _
+      "WHERE p.DateEnd IS NULL " & _
+      "  AND NOT EXISTS (" & _
+      "     SELECT 1 FROM fact_FluxDaily f " & _
+      "     WHERE f.ProductionDate=#" & Format(dJour, "yyyy-mm-dd") & "# " & _
+      "       AND f.BookingCode=p.BookingCode AND f.NoDossier=p.NoDossier " & _
+      "       AND f.DepassementFlag=True" & _
+      "  );"
+    CurrentDb.Execute qClose, dbFailOnError
+End Sub
+
+3) Génération du classeur Excel (Daily + Statistics)
+'=== Module: modReporting ===
+Option Compare Database
+Option Explicit
+
+' Pipeline complet : import + génération du reporting
+Public Sub RunDailyPipeline(ByVal ExcelSource As String, ByVal OutXlsx As String, Optional ByVal ReportDate As Variant)
+    ' 1) Import et mise à jour base
+    Call ImporterFlux(ExcelSource)
+
+    ' 2) Date du reporting (par défaut : dernière ProductionDate)
+    Dim d As Date
+    If IsMissing(ReportDate) Or IsNull(ReportDate) Then
+        d = LatestProdDate
+    Else
+        d = CDate(ReportDate)
+    End If
+
+    ' 3) Générer le classeur
+    Call GenerateDailyWorkbook(OutXlsx, d)
+    MsgBox "Classeur généré: " & OutXlsx, vbInformation
+End Sub
+
+Public Sub GenerateDailyWorkbook(ByVal OutXlsx As String, ByVal d As Date)
+    Dim xlApp As Object, wb As Object, wsDaily As Object, wsStats As Object
+    On Error GoTo EH
+
+    Set xlApp = CreateObject("Excel.Application")
+    xlApp.Visible = False
+    Set wb = xlApp.Workbooks.Add
+    ' Renommer/ajouter feuilles
+    On Error Resume Next
+    wb.Sheets(1).Name = "Daily_Reporting"
+    Set wsDaily = wb.Sheets("Daily_Reporting")
+    On Error GoTo 0
+    If wsDaily Is Nothing Then Set wsDaily = wb.Sheets.Add: wsDaily.Name = "Daily_Reporting"
+
+    Set wsStats = Nothing
+    On Error Resume Next
+    Set wsStats = wb.Sheets("Statistics")
+    On Error GoTo 0
+    If wsStats Is Nothing Then Set wsStats = wb.Sheets.Add(After:=wsDaily): wsStats.Name = "Statistics"
+
+    ' === DAILY: 3 blocs ===
+    Dim r As Long: r = 1
+    r = WriteDaily_StockDepassement wsDaily, d, r
+    r = r + 2
+    r = WriteDaily_Decouverts wsDaily, d, r
+    r = r + 2
+    r = WriteDaily_ResumeParBooking wsDaily, d, r
+
+    ' Mise en forme globale
+    Call BeautifySheet(wsDaily)
+
+    ' === STATS: 3 blocs ===
+    Dim rs As Long: rs = 1
+    rs = WriteStats_HistoriqueClos wsStats, d, 90, rs
+    rs = rs + 2
+    rs = WriteStats_TopDossiers wsStats, d, 90, rs
+    rs = rs + 2
+    rs = WriteStats_Agregats wsStats, d, 30, 90, rs
+
+    Call BeautifySheet(wsStats)
+
+    ' Sauvegarde
+    If Dir(OutXlsx, vbNormal) <> "" Then Kill OutXlsx
+    wb.SaveAs OutXlsx, 51 ' xlOpenXMLWorkbook
+    wb.Close False
+    xlApp.Quit
+    Set xlApp = Nothing
+    Exit Sub
+
+EH:
+    On Error Resume Next
+    If Not wb Is Nothing Then wb.Close False
+    If Not xlApp Is Nothing Then xlApp.Quit
+    MsgBox "Erreur génération Excel: " & Err.Description, vbCritical
+End Sub
+
+'=== Blocs DAILY ===
+
+Private Function WriteDaily_StockDepassement(ws As Object, ByVal d As Date, ByVal startRow As Long) As Long
+    Dim sql As String
+    sql = _
+    "SELECT p.BookingCode, p.NoDossier, doss.NoIntervenant, doss.NoIntervenantGrp, doss.Ligne, " & _
+    "       p.DateBegin, DateDiff('d', p.DateBegin, #" & Format$(d, "yyyy-mm-dd") & "#) + 1 AS JoursEnCours, " & _
+    "       f.Limite, f.Consommation, f.InsuffisanceMontant AS InsuffJour, " & _
+    "       p.MaxInsuffisance, p.MaxDateInsuf " & _
+    "FROM dep_DepassementPeriod p " & _
+    "INNER JOIN dim_Dossier doss ON doss.BookingCode=p.BookingCode AND doss.NoDossier=p.NoDossier " & _
+    "LEFT JOIN fact_FluxDaily f ON f.BookingCode=p.BookingCode AND f.NoDossier=p.NoDossier AND f.ProductionDate=#" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "WHERE p.DateEnd IS NULL " & _
+    "ORDER BY p.BookingCode, JoursEnCours DESC, p.MaxInsuffisance DESC;"
+
+    WriteRecordsetToSheet ws, sql, startRow, "Dossiers en dépassement (au " & Format$(d, "dd/mm/yyyy") & ")"
+    WriteDaily_StockDepassement = startRow + GetRowCount(sql) + 2
+End Function
+
+Private Function WriteDaily_Decouverts(ws As Object, ByVal d As Date, ByVal startRow As Long) As Long
+    Dim sql As String
+    sql = _
+    "SELECT f.BookingCode, f.NoDossier, doss.NoIntervenant, doss.NoIntervenantGrp, doss.Ligne, " & _
+    "       f.ProductionDate, f.Consommation " & _
+    "FROM fact_FluxDaily f " & _
+    "INNER JOIN dim_Dossier doss ON doss.BookingCode=f.BookingCode AND doss.NoDossier=f.NoDossier " & _
+    "WHERE f.DecouvertNonAutoriseFlag=True " & _
+    "  AND f.ProductionDate=#" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "ORDER BY f.Consommation DESC;"
+    WriteRecordsetToSheet ws, sql, startRow, "Découverts non autorisés (au " & Format$(d, "dd/mm/yyyy") & ")"
+    WriteDaily_Decouverts = startRow + GetRowCount(sql) + 2
+End Function
+
+Private Function WriteDaily_ResumeParBooking(ws As Object, ByVal d As Date, ByVal startRow As Long) As Long
+    Dim sql As String
+    sql = _
+    "SELECT f.BookingCode, " & _
+    "       COUNT(IIF(f.DepassementFlag=True,1,Null)) AS NbLignesJourDep, " & _
+    "       COUNT(DISTINCT IIF(f.DepassementFlag=True, f.NoDossier, Null)) AS NbDossiersDep, " & _
+    "       SUM(IIF(f.DepassementFlag=True, f.InsuffisanceMontant, 0)) AS InsuffisanceTotaleJour " & _
+    "FROM fact_FluxDaily f " & _
+    "WHERE f.ProductionDate=#" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "GROUP BY f.BookingCode " & _
+    "ORDER BY InsuffisanceTotaleJour DESC;"
+    WriteRecordsetToSheet ws, sql, startRow, "Résumé par Booking (jour " & Format$(d, "dd/mm/yyyy") & ")"
+    WriteDaily_ResumeParBooking = startRow + GetRowCount(sql) + 2
+End Function
+
+'=== Blocs STATS ===
+
+Private Function WriteStats_HistoriqueClos(ws As Object, ByVal d As Date, ByVal nbJours As Long, ByVal startRow As Long) As Long
+    Dim dmin As Date: dmin = DateAdd("d", -nbJours, d)
+    Dim sql As String
+    sql = _
+    "SELECT BookingCode, NoDossier, DateBegin, DateEnd, NbDays, MaxInsuffisance, MaxDateInsuf " & _
+    "FROM dep_DepassementPeriod " & _
+    "WHERE DateEnd IS NOT NULL " & _
+    "  AND DateEnd BETWEEN #" & Format$(dmin, "yyyy-mm-dd") & "# AND #" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "ORDER BY DateEnd DESC, MaxInsuffisance DESC;"
+    WriteRecordsetToSheet ws, sql, startRow, "Historique des périodes clôturées (" & nbJours & " jours jusqu'au " & Format$(d, "dd/mm/yyyy") & ")"
+    WriteStats_HistoriqueClos = startRow + GetRowCount(sql) + 2
+End Function
+
+Private Function WriteStats_TopDossiers(ws As Object, ByVal d As Date, ByVal nbJours As Long, ByVal startRow As Long) As Long
+    Dim dmin As Date: dmin = DateAdd("d", -nbJours, d)
+    Dim sql As String
+    sql = _
+    "SELECT f.BookingCode, f.NoDossier, " & _
+    "       COUNT(*) AS NbJoursDep, " & _
+    "       SUM(f.InsuffisanceMontant) AS InsuffCumule " & _
+    "FROM fact_FluxDaily f " & _
+    "WHERE f.DepassementFlag=True " & _
+    "  AND f.ProductionDate BETWEEN #" & Format$(dmin, "yyyy-mm-dd") & "# AND #" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "GROUP BY f.BookingCode, f.NoDossier " & _
+    "ORDER BY NbJoursDep DESC, InsuffCumule DESC " & _
+    "FETCH FIRST 50 ROWS ONLY;"
+    ' Access ne supporte pas FETCH FIRST; on fait simple:
+    sql = Replace(sql, "FETCH FIRST 50 ROWS ONLY;", ";")
+    WriteRecordsetToSheet ws, sql, startRow, "Top dossiers en dépassement (" & nbJours & " jours)"
+    ' Pas de TOP ici via SQL pour compatibilité – le tri est fait ; affichera tous.
+    WriteStats_TopDossiers = startRow + GetRowCount(sql) + 2
+End Function
+
+Private Function WriteStats_Agregats(ws As Object, ByVal d As Date, ByVal nbJ30 As Long, ByVal nbJ90 As Long, ByVal startRow As Long) As Long
+    Dim d30 As Date: d30 = DateAdd("d", -nbJ30, d)
+    Dim d90 As Date: d90 = DateAdd("d", -nbJ90, d)
+    Dim sql As String
+
+    ' Agrégat 30 jours par Booking
+    sql = _
+    "SELECT '30j' AS Periode, f.BookingCode, " & _
+    "       COUNT(*) AS NbLignesDep, COUNT(DISTINCT f.NoDossier) AS NbDossiersDep, " & _
+    "       SUM(f.InsuffisanceMontant) AS InsuffCumule " & _
+    "FROM fact_FluxDaily f " & _
+    "WHERE f.DepassementFlag=True AND f.ProductionDate BETWEEN #" & Format$(d30, "yyyy-mm-dd") & "# AND #" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "GROUP BY f.BookingCode " & _
+    "UNION ALL " & _
+    "SELECT '90j' AS Periode, f.BookingCode, " & _
+    "       COUNT(*) AS NbLignesDep, COUNT(DISTINCT f.NoDossier) AS NbDossiersDep, " & _
+    "       SUM(f.InsuffisanceMontant) AS InsuffCumule " & _
+    "FROM fact_FluxDaily f " & _
+    "WHERE f.DepassementFlag=True AND f.ProductionDate BETWEEN #" & Format$(d90, "yyyy-mm-dd") & "# AND #" & Format$(d, "yyyy-mm-dd") & "# " & _
+    "GROUP BY f.BookingCode " & _
+    "ORDER BY 1, 4 DESC;"
+    WriteRecordsetToSheet ws, sql, startRow, "Agrégats 30j / 90j par Booking (au " & Format$(d, "dd/mm/yyyy") & ")"
+    WriteStats_Agregats = startRow + GetRowCount(sql) + 2
+End Function
+
+'=== utilitaires d’écriture Excel ===
+
+Private Sub WriteRecordsetToSheet(ws As Object, ByVal sql As String, ByVal startRow As Long, ByVal title As String)
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim rs As DAO.Recordset: Set rs = db.OpenRecordset(sql, dbOpenSnapshot)
+
+    Dim r As Long, c As Long
+    r = startRow
+
+    ' Titre
+    ws.Cells(r, 1).Value = title
+    ws.Range(ws.Cells(r, 1), ws.Cells(r, 1)).Font.Bold = True
+    r = r + 1
+
+    ' En-têtes
+    For c = 0 To rs.Fields.Count - 1
+        ws.Cells(r, c + 1).Value = rs.Fields(c).Name
+        ws.Cells(r, c + 1).Font.Bold = True
+        ws.Cells(r, c + 1).Interior.ColorIndex = 15 ' gris clair
+        ws.Cells(r, c + 1).Borders.Weight = 2
+    Next c
+    r = r + 1
+
+    ' Lignes
+    If Not rs.EOF Then rs.MoveFirst
+    Do While Not rs.EOF
+        For c = 0 To rs.Fields.Count - 1
+            ws.Cells(r, c + 1).Value = rs.Fields(c).Value
+        Next c
+        r = r + 1
+        rs.MoveNext
+    Loop
+    rs.Close
+
+    ' Mise en forme bloc
+    Dim lastCol As Long: lastCol = IIf(rs Is Nothing, 1, c)
+    lastCol = lastCol ' déjà positionné
+    Dim lastRow As Long: lastRow = r - 1
+    ws.Range(ws.Cells(startRow + 1, 1), ws.Cells(lastRow, c)).EntireColumn.AutoFit
+    ws.Range(ws.Cells(startRow + 1, 1), ws.Cells(lastRow, c)).EntireRow.RowHeight = 15
+    ws.Range(ws.Cells(startRow + 1, 1), ws.Cells(lastRow, c)).Borders.Weight = 2
+End Sub
+
+Private Function GetRowCount(ByVal sql As String) As Long
+    Dim db As DAO.Database: Set db = CurrentDb
+    Dim rs As DAO.Recordset: Set rs = db.OpenRecordset(sql, dbOpenSnapshot)
+    If rs.EOF And rs.BOF Then
+        GetRowCount = 2 ' titre + headers
+    Else
+        rs.MoveLast
+        GetRowCount = rs.RecordCount + 2 ' + titre + headers
+    End If
+    rs.Close
+End Function
+
+Private Sub BeautifySheet(ws As Object)
+    With ws.Cells
+        .EntireColumn.AutoFit
+    End With
+    ' Figer la première ligne utile (après le premier titre) -> optionnel
+    ws.Activate
+    ws.Range("A3").Select
+    ws.Application.ActiveWindow.FreezePanes = True
+End Sub
+
+4) Comment l’utiliser
+
+Depuis Access, lancez par exemple :
+
+Sub Exemple_Run()
+    Dim src As String, outXlsx As String
+    src = "C:\Data\Lombards_Daily.xlsx"           ' votre fichier source du jour
+    outXlsx = "C:\Data\Lombards_Reporting.xlsx"   ' sortie classeur
+    RunDailyPipeline src, outXlsx, Date            ' ou omettez la date pour prendre la dernière ProductionDate importée
+End Sub
+
+
+Le classeur généré contient :
+
+Daily_Reporting
+
+Dossiers en dépassement (au JJ/MM/AAAA) : BookingCode, NoDossier, Intervenants, Ligne, DateBegin, JoursEnCours, Limite, Consommation du jour, InsuffJour, MaxInsuffisance, MaxDateInsuf
+
+Découverts non autorisés (au JJ/MM/AAAA)
+
+Résumé par Booking (jour) : nb lignes et dossiers en dépassement, insuffisance totale du jour
+
+Statistics
+
+Historique des périodes clôturées (90 jours)
+
+Top dossiers (90 jours) : nb jours de dépassement et insuffisance cumulée
+
+Agrégats 30j/90j par Booking
+
+Variantes / options
+
+Vous pouvez changer les fenêtres 30/90 jours dans WriteStats_Agregats et WriteStats_TopDossiers.
+
+Pour ne sortir que le Top 50, transformez la requête Top en deux étapes (enregistrer une table temporaire triée + ne garder que 50 premières), ou utilisez SELECT TOP 50 ... ORDER BY ... (Access supporte TOP).
+
+Exemple rapide avec TOP :
+
+sql = _
+"SELECT TOP 50 f.BookingCode, f.NoDossier, " & _
+"       COUNT(*) AS NbJoursDep, SUM(f.InsuffisanceMontant) AS InsuffCumule " & _
+"FROM fact_FluxDaily f " & _
+"WHERE f.DepassementFlag=True " & _
+"  AND f.ProductionDate BETWEEN #" & Format$(dmin, "yyyy-mm-dd") & "# AND #" & Format$(d, "yyyy-mm-dd") & "# " & _
+"GROUP BY f.BookingCode, f.NoDossier " & _
+"ORDER BY COUNT(*) DESC, SUM(f.InsuffisanceMontant) DESC;"
+
+
+Si tu veux, je peux aussi te fournir une version qui exporte directement les blocs via DoCmd.TransferSpreadsheet à partir de requêtes enregistrées (au lieu d’écrire cellule par cellule) — un peu moins flexible sur la mise en page, mais plus rapide sur de grosses volumétries.
