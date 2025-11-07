@@ -1,0 +1,344 @@
+Parfait, on fige une archi simple, rapide et maintenable autour de ta règle métier :
+
+Jour de retard ⇢ Insuffisance < 0 (par clé unique = Booking + NO DOSSIER CREDIT).
+
+On reste sur une seule base Access avec :
+
+une table Flux courant (retards en cours, une ligne par clé),
+
+une table Archive (retards clos, une ligne par période),
+
+une table de staging pour l’import du fichier Excel du jour,
+
+un bouton (procédure) qui : importe, met à jour Flux/Archive, et ajoute dans ta feuille du jour les colonnes NB Jours de retard et Date de début.
+
+1) Tables (DDL Access)
+
+À coller et exécuter une fois dans Access (fenêtre VBA immédiate ou Sub).
+Clés & index optimisés. On ne stocke pas tout l’historique journalier : seulement les périodes (flux/archives), ça va plus vite et c’est suffisant pour les stats.
+
+'=== Module: modDDL ===
+Option Compare Database
+Option Explicit
+
+Public Sub CreateSchema_Retards()
+    On Error Resume Next
+    CurrentDb.Execute "DROP TABLE ret_FluxCurrent;"
+    CurrentDb.Execute "DROP TABLE ret_Archive;"
+    CurrentDb.Execute "DROP TABLE stg_Excel;"
+    On Error GoTo 0
+
+    ' Staging brut depuis Excel
+    CurrentDb.Execute _
+    "CREATE TABLE stg_Excel (" & _
+    " Booking TEXT(10)," & _
+    " [Production Date] DATETIME," & _
+    " [NO DOSSIER CREDIT] TEXT(50)," & _
+    " [NO NTERVENANT] TEXT(50)," & _
+    " [NO NTERVENANT GRP] TEXT(50)," & _
+    " Ligne TEXT(50)," & _
+    " Limite DOUBLE," & _
+    " Consommation DOUBLE," & _
+    " [Montant Surete] DOUBLE," & _
+    " [Montant AM] DOUBLE," & _
+    " Insuffisance DOUBLE," & _
+    " [Taux de couverture] DOUBLE" & _
+    ");", dbFailOnError
+
+    ' Flux (une ligne par retard EN COURS)
+    CurrentDb.Execute _
+    "CREATE TABLE ret_FluxCurrent (" & _
+    " Booking TEXT(10) NOT NULL," & _
+    " [NO DOSSIER CREDIT] TEXT(50) NOT NULL," & _
+    " DateBegin DATETIME NOT NULL," & _
+    " LastProdDate DATETIME NOT NULL," & _
+    " NbDays LONG NOT NULL," & _
+    " MinInsuffisance DOUBLE NOT NULL," & _
+    " MinInsuffDate DATETIME NOT NULL," & _
+    " LastInsuffisance DOUBLE NOT NULL," & _
+    " CommentaireRisque MEMO," & _
+    " CommentaireFront MEMO," & _
+    " CONSTRAINT PK_ret_FluxCurrent PRIMARY KEY (Booking, [NO DOSSIER CREDIT])" & _
+    ");", dbFailOnError
+    CurrentDb.Execute "CREATE INDEX IX_Flux_LastProdDate ON ret_FluxCurrent(LastProdDate);", dbFailOnError
+
+    ' Archive (une ligne par période close)
+    CurrentDb.Execute _
+    "CREATE TABLE ret_Archive (" & _
+    " PeriodID AUTOINCREMENT PRIMARY KEY," & _
+    " Booking TEXT(10) NOT NULL," & _
+    " [NO DOSSIER CREDIT] TEXT(50) NOT NULL," & _
+    " DateBegin DATETIME NOT NULL," & _
+    " DateEnd DATETIME NOT NULL," & _
+    " NbDays LONG NOT NULL," & _
+    " MinInsuffisance DOUBLE NOT NULL," & _
+    " MinInsuffDate DATETIME NOT NULL" & _
+    ");", dbFailOnError
+    CurrentDb.Execute "CREATE INDEX IX_Arch_Key ON ret_Archive(Booking, [NO DOSSIER CREDIT]);", dbFailOnError
+    CurrentDb.Execute "CREATE INDEX IX_Arch_DateEnd ON ret_Archive(DateEnd);", dbFailOnError
+End Sub
+
+2) Paramètres & petits helpers
+'=== Module: modConfig ===
+Option Compare Database
+Option Explicit
+
+Public Const SRC_SHEET As String = "Feuil1"   ' nom de ta feuille Excel source du jour
+Public Const HAS_HEADERS As Boolean = True    ' en-têtes sur la 1re ligne ?
+
+Public Function MaxProdDate() As Date
+    Dim v As Variant
+    On Error Resume Next
+    v = DMax("[Production Date]", "stg_Excel")
+    On Error GoTo 0
+    If IsNull(v) Then
+        MaxProdDate = Date
+    Else
+        MaxProdDate = CDate(v)
+    End If
+End Function
+
+Private Function K(ByVal booking As String, ByVal noDos As String) As String
+    ' clé concaténée pour dictionnaires Excel
+    K = UCase$(Trim$(booking)) & "||" & UCase$(Trim$(noDos))
+End Function
+
+3) Import Excel du jour → staging
+'=== Module: modImport ===
+Option Compare Database
+Option Explicit
+
+Public Sub ImporterExcelDuJour(ByVal fullPath As String)
+    ' vide staging
+    CurrentDb.Execute "DELETE FROM stg_Excel;", dbFailOnError
+
+    ' import
+    DoCmd.TransferSpreadsheet _
+        TransferType:=acImport, _
+        SpreadsheetType:=acSpreadsheetTypeExcel12Xml, _
+        TableName:="stg_Excel", _
+        FileName:=fullPath, _
+        HasFieldNames:=HAS_HEADERS, _
+        Range:=SRC_SHEET & "$"
+End Sub
+
+4) Moteur de mise à jour Flux / Archive (selon ta règle Insuffisance<0)
+'=== Module: modRetards ===
+Option Compare Database
+Option Explicit
+
+' Met à jour Flux courant et Archive pour la Production Date du jour importé
+Public Sub MajRetards()
+    Dim d As Date: d = MaxProdDate()
+
+    Dim db As DAO.Database: Set db = CurrentDb
+    db.BeginTrans
+
+    ' 1) Insérer/mettre à jour les retards (Insuffisance<0) du jour
+    ' 1a) Nouveaux retards (pas encore en flux)
+    CurrentDb.Execute _
+      "INSERT INTO ret_FluxCurrent (Booking, [NO DOSSIER CREDIT], DateBegin, LastProdDate, NbDays, MinInsuffisance, MinInsuffDate, LastInsuffisance) " & _
+      "SELECT s.Booking, s.[NO DOSSIER CREDIT], s.[Production Date], s.[Production Date], 1, s.Insuffisance, s.[Production Date], s.Insuffisance " & _
+      "FROM stg_Excel s " & _
+      "LEFT JOIN ret_FluxCurrent f ON f.Booking=s.Booking AND f.[NO DOSSIER CREDIT]=s.[NO DOSSIER CREDIT] " & _
+      "WHERE s.[Production Date]=#" & Format$(d, "yyyy-mm-dd") & "# AND s.Insuffisance<0 AND f.[NO DOSSIER CREDIT] IS NULL;", dbFailOnError
+
+    ' 1b) Retards déjà en flux : on prolonge et met à jour les minima
+    CurrentDb.Execute _
+      "UPDATE ret_FluxCurrent AS f " & _
+      "INNER JOIN stg_Excel AS s ON s.Booking=f.Booking AND s.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT] " & _
+      "SET f.NbDays = f.NbDays + 1, " & _
+      "    f.LastProdDate = s.[Production Date], " & _
+      "    f.LastInsuffisance = s.Insuffisance, " & _
+      "    f.MinInsuffisance = IIF(s.Insuffisance < f.MinInsuffisance, s.Insuffisance, f.MinInsuffisance), " & _
+      "    f.MinInsuffDate = IIF(s.Insuffisance < f.MinInsuffisance, s.[Production Date], f.MinInsuffDate) " & _
+      "WHERE s.[Production Date]=#" & Format$(d, "yyyy-mm-dd") & "# AND s.Insuffisance<0;", dbFailOnError
+
+    ' 2) Clôturer les retards qui NE sont PAS en insuffisance (<0) aujourd'hui
+    '    -> archive (DateEnd = d-1), puis suppression du flux
+    CurrentDb.Execute _
+      "INSERT INTO ret_Archive (Booking, [NO DOSSIER CREDIT], DateBegin, DateEnd, NbDays, MinInsuffisance, MinInsuffDate) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.DateBegin, DATEADD('d', -1, #" & Format$(d, "yyyy-mm-dd") & "#), f.NbDays, f.MinInsuffisance, f.MinInsuffDate " & _
+      "FROM ret_FluxCurrent f " & _
+      "WHERE NOT EXISTS ( " & _
+      "  SELECT 1 FROM stg_Excel s " & _
+      "  WHERE s.[Production Date]=#" & Format$(d, "yyyy-mm-dd") & "# " & _
+      "    AND s.Booking=f.Booking AND s.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT] " & _
+      "    AND s.Insuffisance<0 " & _
+      ");", dbFailOnError
+
+    CurrentDb.Execute _
+      "DELETE FROM ret_FluxCurrent " & _
+      "WHERE NOT EXISTS ( " & _
+      "  SELECT 1 FROM stg_Excel s " & _
+      "  WHERE s.[Production Date]=#" & Format$(d, "yyyy-mm-dd") & "# " & _
+      "    AND s.Booking=ret_FluxCurrent.Booking AND s.[NO DOSSIER CREDIT]=ret_FluxCurrent.[NO DOSSIER CREDIT] " & _
+      "    AND s.Insuffisance<0 " & _
+      ");", dbFailOnError
+
+    db.CommitTrans
+End Sub
+
+5) Ajout sur ta feuille Excel des colonnes “NB Jours de retard” & “Date de début”
+
+La proc ouvre ton fichier du jour, ajoute 2 colonnes à droite, et les remplit ligne par ligne via la table ret_FluxCurrent (si la clé est en retard aujourd’hui).
+Colonnes ajoutées : NB Jours de retard, Date début retard.
+
+'=== Module: modExcelWriteBack ===
+Option Compare Database
+Option Explicit
+
+Public Sub AnnoterFeuilleDuJour(ByVal fullPath As String)
+    Dim xl As Object, wb As Object, ws As Object
+    Dim lastCol As Long, lastRow As Long, colNb As Long, colDeb As Long
+    Dim d As Date: d = MaxProdDate()
+
+    ' Préparer dictionnaire Flux courant
+    Dim rs As DAO.Recordset, dictNb As Object, dictDeb As Object
+    Set dictNb = CreateObject("Scripting.Dictionary")
+    Set dictDeb = CreateObject("Scripting.Dictionary")
+
+    Set rs = CurrentDb.OpenRecordset( _
+        "SELECT Booking, [NO DOSSIER CREDIT], NbDays, DateBegin FROM ret_FluxCurrent", dbOpenSnapshot)
+    Do While Not rs.EOF
+        dictNb(K(rs!Booking, rs![NO DOSSIER CREDIT])) = rs!NbDays
+        dictDeb(K(rs!Booking, rs![NO DOSSIER CREDIT])) = rs!DateBegin
+        rs.MoveNext
+    Loop
+    rs.Close
+
+    ' Ouvrir Excel
+    Set xl = CreateObject("Excel.Application")
+    xl.Visible = False
+    Set wb = xl.Workbooks.Open(fullPath)
+    Set ws = wb.Sheets(SRC_SHEET)
+
+    ' Détecter la zone
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(-4162).Row ' xlUp = -4162
+    lastCol = ws.Cells(1, ws.Columns.Count).End(-4159).Column ' xlToLeft = -4159
+
+    ' Ajouter 2 colonnes à droite
+    ws.Cells(1, lastCol + 1).Value = "NB Jours de retard"
+    ws.Cells(1, lastCol + 2).Value = "Date début retard"
+    ws.Range(ws.Cells(1, lastCol + 1), ws.Cells(1, lastCol + 2)).Font.Bold = True
+    colNb = lastCol + 1: colDeb = lastCol + 2
+
+    ' Mapper colonnes clés
+    Dim colBooking As Long, colNoDos As Long, colProd As Long
+    colBooking = FindColumn(ws, "Booking")
+    colNoDos = FindColumn(ws, "NO DOSSIER CREDIT")
+    colProd = FindColumn(ws, "Production Date")
+
+    Dim r As Long, key As String, prod As Date
+    For r = 2 To lastRow
+        ' on ne remplit que pour la date du jour (feuille du jour)
+        If IsDate(ws.Cells(r, colProd).Value) Then
+            prod = CDate(ws.Cells(r, colProd).Value)
+            If prod = d Then
+                key = K(ws.Cells(r, colBooking).Value, ws.Cells(r, colNoDos).Value)
+                If dictNb.Exists(key) Then
+                    ws.Cells(r, colNb).Value = dictNb(key)
+                    ws.Cells(r, colDeb).Value = dictDeb(key)
+                    ws.Cells(r, colDeb).NumberFormat = "dd/mm/yyyy"
+                Else
+                    ws.Cells(r, colNb).Value = ""
+                    ws.Cells(r, colDeb).Value = ""
+                End If
+            End If
+        End If
+    Next r
+
+    ' Mise en forme
+    ws.Columns(colNb).EntireColumn.AutoFit
+    ws.Columns(colDeb).EntireColumn.AutoFit
+
+    wb.Close SaveChanges:=True
+    xl.Quit
+End Sub
+
+Private Function FindColumn(ws As Object, headerText As String) As Long
+    Dim c As Long
+    For c = 1 To ws.Cells(1, ws.Columns.Count).End(-4159).Column ' xlToLeft
+        If Trim$(UCase$(ws.Cells(1, c).Value)) = Trim$(UCase$(headerText)) Then
+            FindColumn = c
+            Exit Function
+        End If
+    Next
+    Err.Raise vbObjectError + 77, , "Colonne introuvable: " & headerText
+End Function
+
+6) Bouton “Daily” (pipeline complet)
+
+À lier à un bouton dans un formulaire Access, ou lancer la Sub.
+Elle importe ton fichier, met à jour Flux/Archive, puis annote ta feuille.
+
+'=== Module: modDaily ===
+Option Compare Database
+Option Explicit
+
+Public Sub Bouton_Daily(ByVal srcXlsx As String)
+    ' 1) Import du jour
+    ImporterExcelDuJour srcXlsx
+
+    ' 2) Moteur retards (ouvre/prolonge/ferme, archive si besoin)
+    MajRetards
+
+    ' 3) Ajout des colonnes et remplissage dans la feuille source
+    AnnoterFeuilleDuJour srcXlsx
+
+    MsgBox "Mise à jour OK. Flux & Archive à jour, feuille annotée.", vbInformation
+End Sub
+
+7) Requêtes utiles (stats rapides)
+
+Retards en cours (stock)
+
+SELECT Booking, [NO DOSSIER CREDIT], DateBegin,
+       DateDiff('d', DateBegin, Date())+1 AS JoursEnCours,
+       NbDays AS NbDaysEnregistre, MinInsuffisance, MinInsuffDate
+FROM ret_FluxCurrent
+ORDER BY Booking, JoursEnCours DESC, MinInsuffisance;  -- (MinInsuffisance est négatif : plus "petit" = pire)
+
+
+Historique clôturé (archive)
+
+SELECT Booking, [NO DOSSIER CREDIT], DateBegin, DateEnd, NbDays, MinInsuffisance, MinInsuffDate
+FROM ret_Archive
+ORDER BY DateEnd DESC, NbDays DESC;
+
+
+KPI sur une fenêtre de dates (archive + courant au besoin)
+
+SELECT Booking,
+       Sum(NbDays) AS JoursRetardCloses
+FROM ret_Archive
+WHERE DateEnd BETWEEN [DateDébut] AND [DateFin]
+GROUP BY Booking
+ORDER BY JoursRetardCloses DESC;
+
+
+(Pour inclure les retards en cours, additionne DateDiff('d', DateBegin, Date())+1 depuis ret_FluxCurrent.)
+
+8) Points d’implémentation
+
+Règle métier : on respecte strictement Insuffisance < 0 ⇒ jour de retard.
+
+MinInsuffisance = le plus négatif observé pendant la période (gravité max)
+
+MinInsuffDate = date correspondante
+
+Vitesse : pas d’historique journalier ⇒ tables petites, indexées ; transactions DAO ; staging vidée chaque jour.
+
+Simplicité : clé (Booking, NO DOSSIER CREDIT) partout ; aucune dépendance à d’autres référentiels.
+
+Maintenabilité : seules trois tables, un pipeline court.
+
+9) Exemple d’appel
+Sub RunToday()
+    Dim src As String
+    src = "C:\Chemin\Ton_Fichier_Du_Jour.xlsx"
+    Bouton_Daily src
+End Sub
+
+
+Si tu veux, je peux ajouter en plus un export “Statistics.xlsx” avec des onglets préformatés (Top N, par Booking, etc.). Mais avec ret_Archive + ret_FluxCurrent, tu as déjà tout pour faire tes stats (durées, nb de périodes, gravités)
