@@ -1,0 +1,713 @@
+Option Explicit
+
+' ====== CONFIG ======
+Private Const DB_NAME As String = "Lombard_Retards.accdb"
+Private Const T_FLUX As String = "T_Flux3"
+Private Const T_ARC As String = "T_Archive3"
+Private Const T_TODAY As String = "T_Today"
+Private Const T_HIST As String = "T_HistoryInsuff"
+Private Const T_LOG As String = "T_RunLog"
+
+' En-têtes Excel (ligne 1)
+Private Const COL_BOOKING As String = "Booking"
+Private Const COL_PROD As String = "Production Date"
+Private Const COL_DOSSIER As String = "NO DOSSIER CREDIT"
+Private Const COL_INTER As String = "NO INTERVENANT"
+Private Const COL_INTER_ALT As String = "NO NTERVENANT"
+Private Const COL_INTER_GRP As String = "NO INTERVENANT GRP"
+Private Const COL_INTER_GRP_ALT As String = "NO NTERVENANT GRP"
+
+Private Const COL_LIMITE As String = "Limite"
+Private Const COL_CONSO As String = "Consommation"
+
+Private Const COL_MVG As String = "Montant VG (valeur de gage-LTV)"
+Private Const COL_MVG_ALT As String = "Montant VG"
+Private Const COL_MAM As String = "Montant AM"
+Private Const COL_MSL As String = "Montant SL"
+
+Private Const COL_IVG As String = "Insuffisance VG"
+Private Const COL_IAM As String = "Insuffisance AM"
+Private Const COL_ISL As String = "Insuffisance SL"
+
+' Colonnes ajoutées (feuille)
+Private Const COL_NBJ_VG As String = "NB Jours retard VG"
+Private Const COL_DEB_VG As String = "Date début VG"
+Private Const COL_FIN_VG As String = "Date fin VG"
+
+Private Const COL_NBJ_AM As String = "NB Jours retard AM"
+Private Const COL_DEB_AM As String = "Date début AM"
+Private Const COL_FIN_AM As String = "Date fin AM"
+
+Private Const COL_NBJ_SL As String = "NB Jours retard SL"
+Private Const COL_DEB_SL As String = "Date début SL"
+Private Const COL_FIN_SL As String = "Date fin SL"
+
+Private Const COL_FLAG_NA As String = "Dépassement non autorisé"
+
+' ====== PUBLIC ENTRY ======
+Public Sub MAJ_Retards_Daily_3in1_NoNzIif()
+    On Error GoTo KO
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+
+    Dim ws As Worksheet: Set ws = ActiveSheet
+    Dim dbPath As String: dbPath = ThisWorkbook.Path & Application.PathSeparator & DB_NAME
+
+    ' 1) DB + schéma
+    EnsureDatabaseAndSchema dbPath
+
+    ' 2) Staging du jour
+    Dim rowsImported As Long
+    rowsImported = LoadTodayIntoAccess(dbPath, ws)
+
+    ' 2b) Normaliser et neutraliser NULL
+    NormalizeToday dbPath
+
+    ' 3) Historique quotidien
+    AppendHistory dbPath
+
+    ' 4) Règles de gestion 3-en-1
+    Dim newFlux As Long, contFlux As Long, closedFlux As Long
+    ProcessBusinessRules_3in1_NoNzIif dbPath, newFlux, contFlux, closedFlux
+
+    ' 5) Enrichir la feuille
+    EnrichSheetFromFlux_3in1 dbPath, ws
+
+    ' 6) Log
+    WriteRunLog dbPath, rowsImported, newFlux, contFlux, closedFlux
+
+    Application.Calculation = xlCalculationAutomatic
+    Application.ScreenUpdating = True
+    MsgBox "Mise à jour terminée :" & vbCrLf & _
+           "Importés : " & rowsImported & vbCrLf & _
+           "Nouveaux flux : " & newFlux & vbCrLf & _
+           "Continués : " & contFlux & vbCrLf & _
+           "Clôturés : " & closedFlux, vbInformation
+    Exit Sub
+KO:
+    Application.Calculation = xlCalculationAutomatic
+    Application.ScreenUpdating = True
+    MsgBox "Erreur : " & Err.Description, vbCritical
+End Sub
+
+' ====== DB bootstrap ======
+Private Sub EnsureDatabaseAndSchema(ByVal dbPath As String)
+    If Dir(dbPath, vbNormal) = vbNullString Then
+        Dim cat As Object: Set cat = CreateObject("ADOX.Catalog")
+        cat.Create "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath
+    End If
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    ExecIfNotExists cn, T_FLUX, GetDDL_Flux
+    ExecIfNotExists cn, T_ARC, GetDDL_Arc
+    ExecIfNotExists cn, T_TODAY, GetDDL_Today
+    ExecIfNotExists cn, T_HIST, GetDDL_Hist
+    ExecIfNotExists cn, T_LOG, GetDDL_Log
+    cn.Close: Set cn = Nothing
+End Sub
+
+Private Function GetConn(ByVal dbPath As String) As Object
+    Dim cn As Object: Set cn = CreateObject("ADODB.Connection")
+    On Error Resume Next
+    cn.Open "Provider=Microsoft.ACE.OLEDB.16.0;Data Source=" & dbPath & ";Persist Security Info=False;"
+    If cn.State = 0 Then cn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath & ";Persist Security Info=False;"
+    On Error GoTo 0
+    Set GetConn = cn
+End Function
+
+Private Sub ExecIfNotExists(ByVal cn As Object, ByVal tableName As String, ByVal ddl As String)
+    Dim rs As Object: Set rs = cn.OpenSchema(20) ' adSchemaTables
+    Dim exists As Boolean: exists = False
+    Do While Not rs.EOF
+        If StrComp(rs.Fields("TABLE_NAME").Value & "", tableName, vbTextCompare) = 0 Then exists = True: Exit Do
+        rs.MoveNext
+    Loop
+    rs.Close: Set rs = Nothing
+    If Not exists Then cn.Execute ddl
+End Sub
+
+Private Function GetDDL_Flux() As String
+    GetDDL_Flux = _
+      "CREATE TABLE " & T_FLUX & " (" & _
+      "Booking TEXT(20) NOT NULL, [NO DOSSIER CREDIT] TEXT(50) NOT NULL, " & _
+      "VG_StartDate DATE, VG_LastUpdateDate DATE, VG_NbJoursRetard LONG, VG_WorstInsuffisance DOUBLE, VG_DateWorstInsuffisance DATE, VG_LastInsuffisance DOUBLE, VG_EndDate DATE, " & _
+      "AM_StartDate DATE, AM_LastUpdateDate DATE, AM_NbJoursRetard LONG, AM_WorstInsuffisance DOUBLE, AM_DateWorstInsuffisance DATE, AM_LastInsuffisance DOUBLE, AM_EndDate DATE, " & _
+      "SL_StartDate DATE, SL_LastUpdateDate DATE, SL_NbJoursRetard LONG, SL_WorstInsuffisance DOUBLE, SL_DateWorstInsuffisance DATE, SL_LastInsuffisance DOUBLE, SL_EndDate DATE, " & _
+      "Limite DOUBLE, Consommation DOUBLE, [Montant VG] DOUBLE, [Montant AM] DOUBLE, [Montant SL] DOUBLE, [Production Date] DATE, [NO INTERVENANT] TEXT(50), [NO INTERVENANT GRP] TEXT(50), " & _
+      "DepassementNA TEXT(3) DEFAULT 'NO', " & _
+      "CONSTRAINT PK_Flux3 PRIMARY KEY (Booking, [NO DOSSIER CREDIT]) );" & _
+      "CREATE INDEX IX_Flux3_VG_Start ON " & T_FLUX & " (VG_StartDate);" & _
+      "CREATE INDEX IX_Flux3_AM_Start ON " & T_FLUX & " (AM_StartDate);" & _
+      "CREATE INDEX IX_Flux3_SL_Start ON " & T_FLUX & " (SL_StartDate);"
+End Function
+
+Private Function GetDDL_Arc() As String
+    GetDDL_Arc = _
+      "CREATE TABLE " & T_ARC & " (" & _
+      "ID COUNTER PRIMARY KEY, Booking TEXT(20) NOT NULL, [NO DOSSIER CREDIT] TEXT(50) NOT NULL, " & _
+      "VG_StartDate DATE, VG_EndDate DATE, VG_Duree LONG, VG_WorstInsuffisance DOUBLE, VG_DateWorstInsuffisance DATE, VG_LastInsuffisance DOUBLE, VG_LastUpdateDate DATE, " & _
+      "AM_StartDate DATE, AM_EndDate DATE, AM_Duree LONG, AM_WorstInsuffisance DOUBLE, AM_DateWorstInsuffisance DATE, AM_LastInsuffisance DOUBLE, AM_LastUpdateDate DATE, " & _
+      "SL_StartDate DATE, SL_EndDate DATE, SL_Duree LONG, SL_WorstInsuffisance DOUBLE, SL_DateWorstInsuffisance DATE, SL_LastInsuffisance DOUBLE, SL_LastUpdateDate DATE, " & _
+      "Limite DOUBLE, Consommation DOUBLE, [Montant VG] DOUBLE, [Montant AM] DOUBLE, [Montant SL] DOUBLE, [Production Date] DATE, [NO INTERVENANT] TEXT(50), [NO INTERVENANT GRP] TEXT(50), " & _
+      "DepassementNA TEXT(3) DEFAULT 'NO', FlagVG TEXT(3) DEFAULT 'NO', FlagAM TEXT(3) DEFAULT 'NO', FlagSL TEXT(3) DEFAULT 'NO', ArchivedAt DATE DEFAULT Date());" & _
+      "CREATE INDEX IX_Arc3_Key ON " & T_ARC & " (Booking, [NO DOSSIER CREDIT]);" & _
+      "CREATE INDEX IX_Arc3_VG_End ON " & T_ARC & " (VG_EndDate);" & _
+      "CREATE INDEX IX_Arc3_AM_End ON " & T_ARC & " (AM_EndDate);" & _
+      "CREATE INDEX IX_Arc3_SL_End ON " & T_ARC & " (SL_EndDate);"
+End Function
+
+Private Function GetDDL_Today() As String
+    GetDDL_Today = _
+      "CREATE TABLE " & T_TODAY & " (" & _
+      "Booking TEXT(20), [Production Date] DATE, [NO DOSSIER CREDIT] TEXT(50), " & _
+      "[NO INTERVENANT] TEXT(50), [NO INTERVENANT GRP] TEXT(50), " & _
+      "Limite DOUBLE, Consommation DOUBLE, [Montant VG] DOUBLE, [Montant AM] DOUBLE, [Montant SL] DOUBLE, " & _
+      "[Insuffisance VG] DOUBLE, [Insuffisance AM] DOUBLE, [Insuffisance SL] DOUBLE);" & _
+      "CREATE INDEX IX_Today_Key ON " & T_TODAY & " (Booking, [NO DOSSIER CREDIT]);"
+End Function
+
+Private Function GetDDL_Hist() As String
+    GetDDL_Hist = _
+      "CREATE TABLE " & T_HIST & " (" & _
+      "Booking TEXT(20) NOT NULL, [NO DOSSIER CREDIT] TEXT(50) NOT NULL, Nature TEXT(2) NOT NULL, [Production Date] DATE NOT NULL, " & _
+      "Insuffisance DOUBLE, Consommation DOUBLE, Limite DOUBLE, [Montant] DOUBLE, DepassementNA TEXT(3) DEFAULT 'NO', " & _
+      "CONSTRAINT IX_Hist UNIQUE (Booking, [NO DOSSIER CREDIT], Nature, [Production Date]) );"
+End Function
+
+Private Function GetDDL_Log() As String
+    GetDDL_Log = _
+      "CREATE TABLE " & T_LOG & " (" & _
+      "RunAt DATETIME NOT NULL, RowsImported LONG, NewFlux LONG, Continued LONG, Closed LONG, [User] TEXT(100));"
+End Function
+
+' ====== Staging ======
+Public Function LoadTodayIntoAccess(ByVal dbPath As String, ByVal ws As Worksheet) As Long
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    cn.Execute "DELETE FROM " & T_TODAY
+
+    Dim sql As String
+    sql = "INSERT INTO " & T_TODAY & " (Booking, [Production Date], [NO DOSSIER CREDIT], [NO INTERVENANT], [NO INTERVENANT GRP], " & _
+          "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Insuffisance VG], [Insuffisance AM], [Insuffisance SL]) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+
+    Dim cmd As Object: Set cmd = CreateObject("ADODB.Command")
+    Set cmd.ActiveConnection = cn
+    cmd.CommandText = sql: cmd.CommandType = 1
+
+    Dim i As Long
+    For i = 1 To 13: cmd.Parameters.Append cmd.CreateParameter(, 200, 1, 255): Next i
+
+    Dim hdrRow As Long: hdrRow = 1
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    If lastRow <= hdrRow Then LoadTodayIntoAccess = 0: GoTo ExitHere
+
+    Dim map As Object: Set map = CreateObject("Scripting.Dictionary")
+    MapCol map, ws, COL_BOOKING
+    MapCol map, ws, COL_PROD
+    MapCol map, ws, COL_DOSSIER
+    MapCol map, ws, COL_INTER, COL_INTER_ALT
+    MapCol map, ws, COL_INTER_GRP, COL_INTER_GRP_ALT
+    MapCol map, ws, COL_LIMITE
+    MapCol map, ws, COL_CONSO
+    MapCol map, ws, COL_MVG, COL_MVG_ALT
+    MapCol map, ws, COL_MAM
+    MapCol map, ws, COL_MSL
+    MapCol map, ws, COL_IVG
+    MapCol map, ws, COL_IAM
+    MapCol map, ws, COL_ISL
+
+    Dim r As Long, n As Long
+    cn.BeginTrans
+    For r = hdrRow + 1 To lastRow
+        cmd.Parameters(0).Value = ws.Cells(r, map(COL_BOOKING)).Value
+        cmd.Parameters(1).Value = ws.Cells(r, map(COL_PROD)).Value
+        cmd.Parameters(2).Value = ws.Cells(r, map(COL_DOSSIER)).Value
+        cmd.Parameters(3).Value = GetCellMaybe(ws, r, map, COL_INTER, COL_INTER_ALT)
+        cmd.Parameters(4).Value = GetCellMaybe(ws, r, map, COL_INTER_GRP, COL_INTER_GRP_ALT)
+        cmd.Parameters(5).Value = ws.Cells(r, map(COL_LIMITE)).Value
+        cmd.Parameters(6).Value = ws.Cells(r, map(COL_CONSO)).Value
+        cmd.Parameters(7).Value = GetCellMaybe(ws, r, map, COL_MVG, COL_MVG_ALT)
+        cmd.Parameters(8).Value = ws.Cells(r, map(COL_MAM)).Value
+        cmd.Parameters(9).Value = ws.Cells(r, map(COL_MSL)).Value
+        cmd.Parameters(10).Value = ws.Cells(r, map(COL_IVG)).Value
+        cmd.Parameters(11).Value = ws.Cells(r, map(COL_IAM)).Value
+        cmd.Parameters(12).Value = ws.Cells(r, map(COL_ISL)).Value
+        cmd.Execute , , 128
+        n = n + 1
+    Next r
+    cn.CommitTrans
+
+    LoadTodayIntoAccess = n
+ExitHere:
+    cn.Close: Set cn = Nothing
+End Function
+
+' Alias anti-typo si tu appelais "Accces"
+Public Function LoadTodayIntoAccces(ByVal dbPath As String, ByVal ws As Worksheet) As Long
+    LoadTodayIntoAccces = LoadTodayIntoAccess(dbPath, ws)
+End Function
+
+' ====== Normalisation ======
+Private Sub NormalizeToday(ByVal dbPath As String)
+    Dim cn As Object: Set cn = GetConn(dbPath)
+
+    cn.Execute "UPDATE " & T_TODAY & " SET Booking = UCase(Trim(Booking));"
+    cn.Execute "UPDATE " & T_TODAY & " SET [NO DOSSIER CREDIT] = Trim([NO DOSSIER CREDIT]);"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Production Date] = Date() WHERE [Production Date] IS NULL;"
+
+    cn.Execute "UPDATE " & T_TODAY & " SET Limite=0 WHERE Limite IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET Consommation=0 WHERE Consommation IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Montant VG]=0 WHERE [Montant VG] IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Montant AM]=0 WHERE [Montant AM] IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Montant SL]=0 WHERE [Montant SL] IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Insuffisance VG]=0 WHERE [Insuffisance VG] IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Insuffisance AM]=0 WHERE [Insuffisance AM] IS NULL;"
+    cn.Execute "UPDATE " & T_TODAY & " SET [Insuffisance SL]=0 WHERE [Insuffisance SL] IS NULL;"
+
+    ' Si doublons de clé avec dates différentes, garde la plus récente
+    cn.Execute _
+      "DELETE FROM " & T_TODAY & " AS a " & _
+      "WHERE EXISTS (SELECT 1 FROM " & T_TODAY & " AS b " & _
+      "              WHERE b.Booking=a.Booking AND b.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] " & _
+      "                AND b.[Production Date] > a.[Production Date]);"
+
+    cn.Close: Set cn = Nothing
+End Sub
+
+' ====== Historique quotidien ======
+Private Sub AppendHistory(ByVal dbPath As String)
+    Dim cn As Object: Set cn = GetConn(dbPath)
+
+    ' VG / AM / SL (insert si pas déjà inséré au même jour)
+    cn.Execute _
+      "INSERT INTO " & T_HIST & " (Booking, [NO DOSSIER CREDIT], Nature, [Production Date], Insuffisance, Consommation, Limite, [Montant]) " & _
+      "SELECT t.Booking, t.[NO DOSSIER CREDIT], 'VG', t.[Production Date], t.[Insuffisance VG], t.Consommation, t.Limite, t.[Montant VG] " & _
+      "FROM " & T_TODAY & " AS t " & _
+      "WHERE NOT EXISTS (SELECT 1 FROM " & T_HIST & " h WHERE h.Booking=t.Booking AND h.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] AND h.Nature='VG' AND h.[Production Date]=t.[Production Date]);"
+
+    cn.Execute _
+      "INSERT INTO " & T_HIST & " (Booking, [NO DOSSIER CREDIT], Nature, [Production Date], Insuffisance, Consommation, Limite, [Montant]) " & _
+      "SELECT t.Booking, t.[NO DOSSIER CREDIT], 'AM', t.[Production Date], t.[Insuffisance AM], t.Consommation, t.Limite, t.[Montant AM] " & _
+      "FROM " & T_TODAY & " AS t " & _
+      "WHERE NOT EXISTS (SELECT 1 FROM " & T_HIST & " h WHERE h.Booking=t.Booking AND h.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] AND h.Nature='AM' AND h.[Production Date]=t.[Production Date]);"
+
+    cn.Execute _
+      "INSERT INTO " & T_HIST & " (Booking, [NO DOSSIER CREDIT], Nature, [Production Date], Insuffisance, Consommation, Limite, [Montant]) " & _
+      "SELECT t.Booking, t.[NO DOSSIER CREDIT], 'SL', t.[Production Date], t.[Insuffisance SL], t.Consommation, t.Limite, t.[Montant SL] " & _
+      "FROM " & T_TODAY & " AS t " & _
+      "WHERE NOT EXISTS (SELECT 1 FROM " & T_HIST & " h WHERE h.Booking=t.Booking AND h.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] AND h.Nature='SL' AND h.[Production Date]=t.[Production Date]);"
+
+    ' Dépassement non autorisé => 'YES'
+    cn.Execute _
+      "UPDATE " & T_HIST & " AS h INNER JOIN " & T_TODAY & " AS t " & _
+      "ON h.Booking=t.Booking AND h.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] AND h.[Production Date]=t.[Production Date] " & _
+      "SET h.DepassementNA='YES' " & _
+      "WHERE Abs(t.Consommation) > t.Limite;"
+
+    cn.Close: Set cn = Nothing
+End Sub
+
+' ====== Règles de gestion (3-en-1) ======
+Private Sub ProcessBusinessRules_3in1_NoNzIif(ByVal dbPath As String, ByRef newFlux As Long, ByRef contFlux As Long, ByRef closedFlux As Long)
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    On Error GoTo ROLLBACK
+    cn.BeginTrans
+
+    Dim nNew As Long, nCont As Long, nClosed As Long
+
+    ' 1) INSERT de nouvelles clés en FLUX si au moins une insuff < 0
+    cn.Execute _
+      "INSERT INTO " & T_FLUX & " (Booking, [NO DOSSIER CREDIT], Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP]) " & _
+      "SELECT t.Booking, t.[NO DOSSIER CREDIT], t.Limite, t.Consommation, t.[Montant VG], t.[Montant AM], t.[Montant SL], t.[Production Date], t.[NO INTERVENANT], t.[NO INTERVENANT GRP] " & _
+      "FROM " & T_TODAY & " AS t " & _
+      "WHERE (t.[Insuffisance VG] < 0 OR t.[Insuffisance AM] < 0 OR t.[Insuffisance SL] < 0) " & _
+      "  AND NOT EXISTS (SELECT 1 FROM " & T_FLUX & " AS f WHERE f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT]);"
+    nNew = cn.RecordsAffected
+
+    ' 2) Détermine DepassementNA ('YES'/'NO') sur le FLUX
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t " & _
+      "ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.DepassementNA='YES' WHERE Abs(t.Consommation) > t.Limite;"
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t " & _
+      "ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.DepassementNA='NO' WHERE NOT (Abs(t.Consommation) > t.Limite);"
+
+    ' 3) Démarrages VG/AM/SL
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.VG_StartDate=t.[Production Date], f.VG_LastUpdateDate=t.[Production Date], f.VG_NbJoursRetard=1, f.VG_WorstInsuffisance=t.[Insuffisance VG], f.VG_DateWorstInsuffisance=t.[Production Date], f.VG_LastInsuffisance=t.[Insuffisance VG] " & _
+      "WHERE f.VG_StartDate IS NULL AND t.[Insuffisance VG] < 0;"
+    nNew = nNew + cn.RecordsAffected
+
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.AM_StartDate=t.[Production Date], f.AM_LastUpdateDate=t.[Production Date], f.AM_NbJoursRetard=1, f.AM_WorstInsuffisance=t.[Insuffisance AM], f.AM_DateWorstInsuffisance=t.[Production Date], f.AM_LastInsuffisance=t.[Insuffisance AM] " & _
+      "WHERE f.AM_StartDate IS NULL AND t.[Insuffisance AM] < 0;"
+    nNew = nNew + cn.RecordsAffected
+
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.SL_StartDate=t.[Production Date], f.SL_LastUpdateDate=t.[Production Date], f.SL_NbJoursRetard=1, f.SL_WorstInsuffisance=t.[Insuffisance SL], f.SL_DateWorstInsuffisance=t.[Production Date], f.SL_LastInsuffisance=t.[Insuffisance SL] " & _
+      "WHERE f.SL_StartDate IS NULL AND t.[Insuffisance SL] < 0;"
+    nNew = nNew + cn.RecordsAffected
+
+    ' 4) Continuations + mise à jour "pire"
+    ' VG
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.VG_NbJoursRetard=f.VG_NbJoursRetard + DateDiff('d', f.VG_LastUpdateDate, t.[Production Date]), " & _
+      "    f.VG_LastUpdateDate=t.[Production Date], f.VG_LastInsuffisance=t.[Insuffisance VG], " & _
+      "    f.Limite=t.Limite, f.Consommation=t.Consommation, f.[Montant VG]=t.[Montant VG], f.[Montant AM]=t.[Montant AM], f.[Montant SL]=t.[Montant SL], f.[Production Date]=t.[Production Date], " & _
+      "    f.[NO INTERVENANT]=t.[NO INTERVENANT], f.[NO INTERVENANT GRP]=t.[NO INTERVENANT GRP] " & _
+      "WHERE t.[Insuffisance VG] < 0 AND f.VG_StartDate IS NOT NULL AND t.[Production Date] > f.VG_LastUpdateDate;"
+    nCont = cn.RecordsAffected
+
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.VG_WorstInsuffisance=t.[Insuffisance VG], f.VG_DateWorstInsuffisance=t.[Production Date] " & _
+      "WHERE t.[Insuffisance VG] < 0 AND f.VG_StartDate IS NOT NULL AND (f.VG_WorstInsuffisance IS NULL OR t.[Insuffisance VG] < f.VG_WorstInsuffisance);"
+
+    ' AM
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.AM_NbJoursRetard=f.AM_NbJoursRetard + DateDiff('d', f.AM_LastUpdateDate, t.[Production Date]), " & _
+      "    f.AM_LastUpdateDate=t.[Production Date], f.AM_LastInsuffisance=t.[Insuffisance AM], " & _
+      "    f.Limite=t.Limite, f.Consommation=t.Consommation, f.[Montant VG]=t.[Montant VG], f.[Montant AM]=t.[Montant AM], f.[Montant SL]=t.[Montant SL], f.[Production Date]=t.[Production Date], " & _
+      "    f.[NO INTERVENANT]=t.[NO INTERVENANT], f.[NO INTERVENANT GRP]=t.[NO INTERVENANT GRP] " & _
+      "WHERE t.[Insuffisance AM] < 0 AND f.AM_StartDate IS NOT NULL AND t.[Production Date] > f.AM_LastUpdateDate;"
+    nCont = nCont + cn.RecordsAffected
+
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.AM_WorstInsuffisance=t.[Insuffisance AM], f.AM_DateWorstInsuffisance=t.[Production Date] " & _
+      "WHERE t.[Insuffisance AM] < 0 AND f.AM_StartDate IS NOT NULL AND (f.AM_WorstInsuffisance IS NULL OR t.[Insuffisance AM] < f.AM_WorstInsuffisance);"
+
+    ' SL
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.SL_NbJoursRetard=f.SL_NbJoursRetard + DateDiff('d', f.SL_LastUpdateDate, t.[Production Date]), " & _
+      "    f.SL_LastUpdateDate=t.[Production Date], f.SL_LastInsuffisance=t.[Insuffisance SL], " & _
+      "    f.Limite=t.Limite, f.Consommation=t.Consommation, f.[Montant VG]=t.[Montant VG], f.[Montant AM]=t.[Montant AM], f.[Montant SL]=t.[Montant SL], f.[Production Date]=t.[Production Date], " & _
+      "    f.[NO INTERVENANT]=t.[NO INTERVENANT], f.[NO INTERVENANT GRP]=t.[NO INTERVENANT GRP] " & _
+      "WHERE t.[Insuffisance SL] < 0 AND f.SL_StartDate IS NOT NULL AND t.[Production Date] > f.SL_LastUpdateDate;"
+    nCont = nCont + cn.RecordsAffected
+
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.SL_WorstInsuffisance=t.[Insuffisance SL], f.SL_DateWorstInsuffisance=t.[Production Date] " & _
+      "WHERE t.[Insuffisance SL] < 0 AND f.SL_StartDate IS NOT NULL AND (f.SL_WorstInsuffisance IS NULL OR t.[Insuffisance SL] < f.SL_WorstInsuffisance);"
+
+    ' 5) Rafraîchir DepassementNA après continuations
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t " & _
+      "ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.DepassementNA='YES' WHERE Abs(t.Consommation) > t.Limite;"
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t " & _
+      "ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.DepassementNA='NO' WHERE NOT (Abs(t.Consommation) > t.Limite);"
+
+    ' 6) Archivage (clé absente ou nature revenue >= 0)
+    ' VG
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], VG_StartDate, VG_EndDate, VG_Duree, VG_WorstInsuffisance, VG_DateWorstInsuffisance, VG_LastInsuffisance, VG_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.VG_StartDate, f.VG_LastUpdateDate, f.VG_NbJoursRetard, f.VG_WorstInsuffisance, f.VG_DateWorstInsuffisance, f.VG_LastInsuffisance, f.VG_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], f.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'YES','NO','NO' " & _
+      "FROM " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.VG_StartDate IS NOT NULL AND t.Booking IS NULL;"
+    nClosed = cn.RecordsAffected
+
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], VG_StartDate, VG_EndDate, VG_Duree, VG_WorstInsuffisance, VG_DateWorstInsuffisance, VG_LastInsuffisance, VG_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.VG_StartDate, t.[Production Date], f.VG_NbJoursRetard, f.VG_WorstInsuffisance, f.VG_DateWorstInsuffisance, f.VG_LastInsuffisance, f.VG_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], t.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'YES','NO','NO' " & _
+      "FROM " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.VG_StartDate IS NOT NULL AND t.[Insuffisance VG] >= 0;"
+    nClosed = nClosed + cn.RecordsAffected
+
+    ' AM
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], AM_StartDate, AM_EndDate, AM_Duree, AM_WorstInsuffisance, AM_DateWorstInsuffisance, AM_LastInsuffisance, AM_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.AM_StartDate, f.AM_LastUpdateDate, f.AM_NbJoursRetard, f.AM_WorstInsuffisance, f.AM_DateWorstInsuffisance, f.AM_LastInsuffisance, f.AM_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], f.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'NO','YES','NO' " & _
+      "FROM " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.AM_StartDate IS NOT NULL AND t.Booking IS NULL;"
+    nClosed = nClosed + cn.RecordsAffected
+
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], AM_StartDate, AM_EndDate, AM_Duree, AM_WorstInsuffisance, AM_DateWorstInsuffisance, AM_LastInsuffisance, AM_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.AM_StartDate, t.[Production Date], f.AM_NbJoursRetard, f.AM_WorstInsuffisance, f.AM_DateWorstInsuffisance, f.AM_LastInsuffisance, f.AM_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], t.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'NO','YES','NO' " & _
+      "FROM " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.AM_StartDate IS NOT NULL AND t.[Insuffisance AM] >= 0;"
+    nClosed = nClosed + cn.RecordsAffected
+
+    ' SL
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], SL_StartDate, SL_EndDate, SL_Duree, SL_WorstInsuffisance, SL_DateWorstInsuffisance, SL_LastInsuffisance, SL_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.SL_StartDate, f.SL_LastUpdateDate, f.SL_NbJoursRetard, f.SL_WorstInsuffisance, f.SL_DateWorstInsuffisance, f.SL_LastInsuffisance, f.SL_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], f.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'NO','NO','YES' " & _
+      "FROM " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.SL_StartDate IS NOT NULL AND t.Booking IS NULL;"
+    nClosed = nClosed + cn.RecordsAffected
+
+    cn.Execute _
+      "INSERT INTO " & T_ARC & " (Booking, [NO DOSSIER CREDIT], SL_StartDate, SL_EndDate, SL_Duree, SL_WorstInsuffisance, SL_DateWorstInsuffisance, SL_LastInsuffisance, SL_LastUpdateDate, " & _
+      "Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP], DepassementNA, FlagVG, FlagAM, FlagSL) " & _
+      "SELECT f.Booking, f.[NO DOSSIER CREDIT], f.SL_StartDate, t.[Production Date], f.SL_NbJoursRetard, f.SL_WorstInsuffisance, f.SL_DateWorstInsuffisance, f.SL_LastInsuffisance, f.SL_LastUpdateDate, " & _
+      "f.Limite, f.Consommation, f.[Montant VG], f.[Montant AM], f.[Montant SL], t.[Production Date], f.[NO INTERVENANT], f.[NO INTERVENANT GRP], f.DepassementNA, 'NO','NO','YES' " & _
+      "FROM " & T_FLUX & " AS f INNER JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE f.SL_StartDate IS NOT NULL AND t.[Insuffisance SL] >= 0;"
+    nClosed = nClosed + cn.RecordsAffected
+
+    ' 7) Flags multi-natures via historique (passe à 'YES' si chevauchement avec insuff < 0)
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagAM='YES' " & _
+      "WHERE a.FlagVG='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='AM' " & _
+      "    AND h.[Production Date] BETWEEN a.VG_StartDate AND a.VG_EndDate AND h.Insuffisance < 0" & _
+      ");"
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagSL='YES' " & _
+      "WHERE a.FlagVG='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='SL' " & _
+      "    AND h.[Production Date] BETWEEN a.VG_StartDate AND a.VG_EndDate AND h.Insuffisance < 0" & _
+      ");"
+
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagVG='YES' " & _
+      "WHERE a.FlagAM='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='VG' " & _
+      "    AND h.[Production Date] BETWEEN a.AM_StartDate AND a.AM_EndDate AND h.Insuffisance < 0" & _
+      ");"
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagSL='YES' " & _
+      "WHERE a.FlagAM='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='SL' " & _
+      "    AND h.[Production Date] BETWEEN a.AM_StartDate AND a.AM_EndDate AND h.Insuffisance < 0" & _
+      ");"
+
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagVG='YES' " & _
+      "WHERE a.FlagSL='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='VG' " & _
+      "    AND h.[Production Date] BETWEEN a.SL_StartDate AND a.SL_EndDate AND h.Insuffisance < 0" & _
+      ");"
+    cn.Execute _
+      "UPDATE " & T_ARC & " AS a SET a.FlagAM='YES' " & _
+      "WHERE a.FlagSL='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=a.Booking AND h.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] AND h.Nature='AM' " & _
+      "    AND h.[Production Date] BETWEEN a.SL_StartDate AND a.SL_EndDate AND h.Insuffisance < 0" & _
+      ");"
+
+    ' 8) Purge FLUX des sous-épisodes clos
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.VG_StartDate=Null, f.VG_LastUpdateDate=Null, f.VG_NbJoursRetard=Null, f.VG_WorstInsuffisance=Null, f.VG_DateWorstInsuffisance=Null, f.VG_LastInsuffisance=Null, f.VG_EndDate=Null " & _
+      "WHERE f.VG_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance VG] >= 0);"
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.AM_StartDate=Null, f.AM_LastUpdateDate=Null, f.AM_NbJoursRetard=Null, f.AM_WorstInsuffisance=Null, f.AM_DateWorstInsuffisance=Null, f.AM_LastInsuffisance=Null, f.AM_EndDate=Null " & _
+      "WHERE f.AM_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance AM] >= 0);"
+    cn.Execute _
+      "UPDATE " & T_FLUX & " AS f LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET f.SL_StartDate=Null, f.SL_LastUpdateDate=Null, f.SL_NbJoursRetard=Null, f.SL_WorstInsuffisance=Null, f.SL_DateWorstInsuffisance=Null, f.SL_LastInsuffisance=Null, f.SL_EndDate=Null " & _
+      "WHERE f.SL_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance SL] >= 0);"
+
+    ' Supprime la ligne si plus aucun sous-épisode ouvert
+    cn.Execute "DELETE FROM " & T_FLUX & " WHERE VG_StartDate IS NULL AND AM_StartDate IS NULL AND SL_StartDate IS NULL;"
+
+    cn.CommitTrans
+    newFlux = nNew: contFlux = nCont: closedFlux = nClosed
+    cn.Close: Set cn = Nothing
+    Exit Sub
+ROLLBACK:
+    cn.RollbackTrans
+    cn.Close: Set cn = Nothing
+    Err.Raise Err.Number, , Err.Description
+End Sub
+
+' ====== Enrichissement feuille ======
+Private Sub EnrichSheetFromFlux_3in1(ByVal dbPath As String, ByVal ws As Worksheet)
+    Dim cNBJ_VG As Long, cDEB_VG As Long, cFIN_VG As Long
+    Dim cNBJ_AM As Long, cDEB_AM As Long, cFIN_AM As Long
+    Dim cNBJ_SL As Long, cDEB_SL As Long, cFIN_SL As Long
+    Dim cNA As Long
+    cNBJ_VG = EnsureColumn(ws, COL_NBJ_VG): cDEB_VG = EnsureColumn(ws, COL_DEB_VG): cFIN_VG = EnsureColumn(ws, COL_FIN_VG)
+    cNBJ_AM = EnsureColumn(ws, COL_NBJ_AM): cDEB_AM = EnsureColumn(ws, COL_DEB_AM): cFIN_AM = EnsureColumn(ws, COL_FIN_AM)
+    cNBJ_SL = EnsureColumn(ws, COL_NBJ_SL): cDEB_SL = EnsureColumn(ws, COL_DEB_SL): cFIN_SL = EnsureColumn(ws, COL_FIN_SL)
+    cNA = EnsureColumn(ws, COL_FLAG_NA)
+
+    Dim prodDateSheet As Variant
+    prodDateSheet = DetectSheetProductionDate(ws)
+
+    Dim dVG As Object, dAM As Object, dSL As Object
+    Set dVG = LoadFluxDict_3in1(dbPath, "VG")
+    Set dAM = LoadFluxDict_3in1(dbPath, "AM")
+    Set dSL = LoadFluxDict_3in1(dbPath, "SL")
+
+    Dim aVG As Object, aAM As Object, aSL As Object
+    Set aVG = LoadArchiveEndDictForDate_3in1(dbPath, "VG", prodDateSheet)
+    Set aAM = LoadArchiveEndDictForDate_3in1(dbPath, "AM", prodDateSheet)
+    Set aSL = LoadArchiveEndDictForDate_3in1(dbPath, "SL", prodDateSheet)
+
+    Dim map As Object: Set map = CreateObject("Scripting.Dictionary")
+    MapCol map, ws, COL_BOOKING
+    MapCol map, ws, COL_DOSSIER
+    MapCol map, ws, COL_CONSO
+    MapCol map, ws, COL_LIMITE
+
+    Dim r As Long, lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    If lastRow < 2 Then Exit Sub
+
+    For r = 2 To lastRow
+        Dim bk As String: bk = Trim$(UCase$(CStr(ws.Cells(r, map(COL_BOOKING)).Value)))
+        Dim dos As String: dos = Trim$(CStr(ws.Cells(r, map(COL_DOSSIER)).Value))
+        Dim k As String: k = bk & "||" & dos
+
+        Dim conso As Double, lim As Double
+        conso = Val(ws.Cells(r, map(COL_CONSO)).Value)
+        lim = Val(ws.Cells(r, map(COL_LIMITE)).Value)
+        If Abs(conso) > lim Then
+            ws.Cells(r, cNA).Value = "YES"
+        Else
+            ws.Cells(r, cNA).Value = "NO"
+        End If
+
+        If dVG.Exists(k) Then
+            ws.Cells(r, cNBJ_VG).Value = dVG(k)(1)
+            ws.Cells(r, cDEB_VG).Value = dVG(k)(0)
+        Else
+            ws.Cells(r, cNBJ_VG).ClearContents
+            ws.Cells(r, cDEB_VG).ClearContents
+        End If
+        If aVG.Exists(k) Then ws.Cells(r, cFIN_VG).Value = aVG(k) Else ws.Cells(r, cFIN_VG).ClearContents
+
+        If dAM.Exists(k) Then
+            ws.Cells(r, cNBJ_AM).Value = dAM(k)(1)
+            ws.Cells(r, cDEB_AM).Value = dAM(k)(0)
+        Else
+            ws.Cells(r, cNBJ_AM).ClearContents
+            ws.Cells(r, cDEB_AM).ClearContents
+        End If
+        If aAM.Exists(k) Then ws.Cells(r, cFIN_AM).Value = aAM(k) Else ws.Cells(r, cFIN_AM).ClearContents
+
+        If dSL.Exists(k) Then
+            ws.Cells(r, cNBJ_SL).Value = dSL(k)(1)
+            ws.Cells(r, cDEB_SL).Value = dSL(k)(0)
+        Else
+            ws.Cells(r, cNBJ_SL).ClearContents
+            ws.Cells(r, cDEB_SL).ClearContents
+        End If
+        If aSL.Exists(k) Then ws.Cells(r, cFIN_SL).Value = aSL(k) Else ws.Cells(r, cFIN_SL).ClearContents
+    Next r
+
+    ws.Columns(cNBJ_VG).NumberFormat = "0"
+    ws.Columns(cNBJ_AM).NumberFormat = "0"
+    ws.Columns(cNBJ_SL).NumberFormat = "0"
+    ws.Columns(cDEB_VG).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cDEB_AM).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cDEB_SL).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cFIN_VG).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cFIN_AM).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cFIN_SL).NumberFormat = "dd/mm/yyyy"
+End Sub
+
+' ====== Helpers ======
+Private Function DetectSheetProductionDate(ws As Worksheet) As Variant
+    Dim col As Long: col = FindHeader(ws, COL_PROD)
+    If col = 0 Then DetectSheetProductionDate = Date: Exit Function
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, col).End(xlUp).Row
+    Dim r As Long, maxDt As Date: maxDt = #1/1/1900#
+    For r = 2 To lastRow
+        If IsDate(ws.Cells(r, col).Value) Then
+            If CDate(ws.Cells(r, col).Value) > maxDt Then maxDt = CDate(ws.Cells(r, col).Value)
+        End If
+    Next r
+    If maxDt = #1/1/1900# Then DetectSheetProductionDate = Date Else DetectSheetProductionDate = maxDt
+End Function
+
+Private Function LoadFluxDict_3in1(ByVal dbPath As String, ByVal nature As String) As Object
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    Dim rs As Object: Set rs = CreateObject("ADODB.Recordset")
+    Dim sql As String
+    If nature = "VG" Then
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], VG_StartDate, VG_NbJoursRetard FROM " & T_FLUX & " WHERE VG_StartDate IS NOT NULL"
+    ElseIf nature = "AM" Then
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], AM_StartDate, AM_NbJoursRetard FROM " & T_FLUX & " WHERE AM_StartDate IS NOT NULL"
+    Else
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], SL_StartDate, SL_NbJoursRetard FROM " & T_FLUX & " WHERE SL_StartDate IS NOT NULL"
+    End If
+    rs.Open sql, cn, 1, 1
+    Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
+    Do While Not rs.EOF
+        d(Trim$(UCase$(rs(0).Value)) & "||" & Trim$(rs(1).Value)) = Array(rs(2).Value, rs(3).Value)
+        rs.MoveNext
+    Loop
+    rs.Close: cn.Close
+    Set LoadFluxDict_3in1 = d
+End Function
+
+Private Function LoadArchiveEndDictForDate_3in1(ByVal dbPath As String, ByVal nature As String, ByVal endDate As Variant) As Object
+    Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
+    If IsDate(endDate) = False Then Set LoadArchiveEndDictForDate_3in1 = d: Exit Function
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    Dim rs As Object: Set rs = CreateObject("ADODB.Recordset")
+    Dim sql As String
+    Dim dStr As String: dStr = Format(CDate(endDate), "mm/dd/yyyy")
+    If nature = "VG" Then
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], VG_EndDate FROM " & T_ARC & " WHERE FlagVG='YES' AND VG_EndDate = #" & dStr & "#"
+    ElseIf nature = "AM" Then
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], AM_EndDate FROM " & T_ARC & " WHERE FlagAM='YES' AND AM_EndDate = #" & dStr & "#"
+    Else
+        sql = "SELECT Booking, [NO DOSSIER CREDIT], SL_EndDate FROM " & T_ARC & " WHERE FlagSL='YES' AND SL_EndDate = #" & dStr & "#"
+    End If
+    rs.Open sql, cn, 1, 1
+    Do While Not rs.EOF
+        d(Trim$(UCase$(rs(0).Value)) & "||" & Trim$(rs(1).Value)) = rs(2).Value
+        rs.MoveNext
+    Loop
+    rs.Close: cn.Close
+    Set LoadArchiveEndDictForDate_3in1 = d
+End Function
+
+Private Sub MapCol(ByVal dict As Object, ByVal ws As Worksheet, ByVal name1 As String, Optional ByVal name2 As String = "")
+    Dim c As Long: c = FindHeader(ws, name1)
+    If c = 0 And Len(name2) > 0 Then c = FindHeader(ws, name2)
+    If c = 0 Then Err.Raise vbObjectError + 10, , "Colonne introuvable : " & name1 & IIf(Len(name2) > 0, " (alt : " & name2 & ")", "")
+    dict(AddKey(dict, name1)) = c
+End Sub
+
+Private Function AddKey(ByVal dict As Object, ByVal k As String) As String
+    If Not dict.Exists(k) Then dict.Add k, 0
+    AddKey = k
+End Function
+
+Private Function FindHeader(ByVal ws As Worksheet, ByVal hdr As String) As Long
+    Dim c As Range
+    For Each c In ws.Rows(1).Cells
+        If Trim$(UCase$(c.Value & "")) = Trim$(UCase$(hdr)) Then FindHeader = c.Column: Exit Function
+        If Len(c.Value & "") = 0 Then Exit For
+    Next c
+End Function
+
+Private Function GetCellMaybe(ws As Worksheet, r As Long, map As Object, name1 As String, name2 As String) As Variant
+    If map.Exists(name1) Then GetCellMaybe = ws.Cells(r, map(name1)).Value: Exit Function
+    If map.Exists(name2) Then GetCellMaybe = ws.Cells(r, map(name2)).Value: Exit Function
+    GetCellMaybe = Null
+End Function
+
+Private Function EnsureColumn(ByVal ws As Worksheet, ByVal header As String) As Long
+    Dim c As Lo
