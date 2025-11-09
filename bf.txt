@@ -1,0 +1,23 @@
+' 1) INSERT de nouvelles clés en FLUX si au moins une insuff < 0 (cast explicites)
+cn.Execute _
+  "INSERT INTO " & T_FLUX & " (" & _
+  "  Booking, [NO DOSSIER CREDIT], Limite, Consommation, [Montant VG], [Montant AM], [Montant SL], [Production Date], [NO INTERVENANT], [NO INTERVENANT GRP]" & _
+  ") " & _
+  "SELECT " & _
+  "  CStr(t.Booking) AS Booking, " & _
+  "  CStr(t.[NO DOSSIER CREDIT]) AS NDC, " & _
+  "  CDbl(t.Limite) AS Limite, " & _
+  "  CDbl(t.Consommation) AS Consommation, " & _
+  "  CDbl(t.[Montant VG]) AS MVG, " & _
+  "  CDbl(t.[Montant AM]) AS MAM, " & _
+  "  CDbl(t.[Montant SL]) AS MSL, " & _
+  "  CDate(t.[Production Date]) AS ProdDate, " & _
+  "  CStr(t.[NO INTERVENANT]) AS Interv, " & _
+  "  CStr(t.[NO INTERVENANT GRP]) AS IntervGrp " & _
+  "FROM " & T_TODAY & " AS t " & _
+  "WHERE (t.[Insuffisance VG] < 0 OR t.[Insuffisance AM] < 0 OR t.[Insuffisance SL] < 0) " & _
+  "  AND NOT EXISTS (" & _
+  "      SELECT 1 FROM " & T_FLUX & " AS f " & _
+  "      WHERE f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT]" & _
+  "  );"
+nNew = cn.RecordsAffected
