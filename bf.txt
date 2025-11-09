@@ -1,0 +1,127 @@
+es — tu peux « faker » la date pour faire comme si on était J+1, J+2, etc., et donc tester les passages Flux → Archive sans modifier ton fichier source à la main.
+Voici un mode Simulation que tu peux coller tel quel dans ton module : il mémorise une date simulée dans la base (table T_Config) et force T_Today.[Production Date] à cette date à chaque run, puis avance d’un jour automatiquement.
+
+🔧 Patch “Mode Simulation de date” (prêt à coller)
+A) Constantes à ajouter en haut du module (sous Option Explicit)
+
+' ====== TEST CLOCK ======
+Private Const TEST_MODE As Boolean = True      ' <-- Mets False en PROD
+Private Const TEST_STEP_DAYS As Long = 1       ' pas d'avancement à chaque run (1 = +1 jour)
+Private Const TEST_START_DATE As Date = #1/1/2024#  ' date de départ de la simu (US literal mm/dd/yyyy)
+Private Const T_CFG As String = "T_Config"
+B) Helpers “horloge” à coller n’importe où dans le module
+
+' Date -> littéral SQL (#mm/dd/yyyy#)
+Private Function SqlDate(ByVal d As Date) As String
+    SqlDate = "#" & Format$(d, "mm\/dd\/yyyy") & "#"
+End Function
+' S'assure que T_Config existe
+Private Sub EnsureConfigTable(ByVal cn As Object)
+    ExecIfNotExists cn, T_CFG, _
+        "CREATE TABLE " & T_CFG & " (" & _
+        "  CfgKey TEXT(50) PRIMARY KEY, " & _
+        "  CfgVal TEXT(255)" & _
+        ")"
+End Sub
+' Lit une clé de config (ou renvoie "")
+Private Function CfgGet(ByVal cn As Object, ByVal k As String) As String
+    Dim rs As Object: Set rs = CreateObject("ADODB.Recordset")
+    rs.Open "SELECT CfgVal FROM " & T_CFG & " WHERE CfgKey='" & k & "'", cn, 1, 3
+    If Not rs.EOF Then CfgGet = rs.Fields(0).Value & ""
+    rs.Close: Set rs = Nothing
+End Function
+' Ecrit/UPSERT une clé de config
+Private Sub CfgSet(ByVal cn As Object, ByVal k As String, ByVal v As String)
+    Dim rs As Object: Set rs = CreateObject("ADODB.Recordset")
+    rs.Open "SELECT CfgVal FROM " & T_CFG & " WHERE CfgKey='" & k & "'", cn, 1, 3
+    If rs.EOF Then
+        rs.AddNew
+        rs.Fields("CfgKey").Value = k
+        rs.Fields("CfgVal").Value = v
+        rs.Update
+    Else
+        rs.Fields("CfgVal").Value = v
+        rs.Update
+    End If
+    rs.Close: Set rs = Nothing
+End Sub
+' Renvoie la date simulée (créée si absente)
+Private Function GetSimDate(ByVal dbPath As String) As Date
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    EnsureConfigTable cn
+    Dim s As String: s = CfgGet(cn, "SimDate")
+    If Len(s) = 0 Then
+        CfgSet cn, "SimDate", Format$(TEST_START_DATE, "yyyy-mm-dd")
+        GetSimDate = TEST_START_DATE
+    Else
+        ' parse "yyyy-mm-dd" en Date
+        GetSimDate = DateSerial(Left$(s, 4), Mid$(s, 6, 2), Right$(s, 2))
+    End If
+    cn.Close: Set cn = Nothing
+End Function
+' Avance la date simulée de TEST_STEP_DAYS
+Private Sub BumpSimDate(ByVal dbPath As String)
+    Dim cn As Object: Set cn = GetConn(dbPath)
+    EnsureConfigTable cn
+    Dim d As Date: d = GetSimDate(dbPath)
+    d = DateAdd("d", TEST_STEP_DAYS, d)
+    CfgSet cn, "SimDate", Format$(d, "yyyy-mm-dd")
+    cn.Close: Set cn = Nothing
+End Sub
+' Utilitaire pour forcer une date simulée manuellement (ex. tests)
+Public Sub SetSimDateManual()
+    Dim dbPath As String: dbPath = ThisWorkbook.Path & Application.PathSeparator & DB_NAME
+    Dim s As String, d As Date
+    s = InputBox("Entrer la date simulée (yyyy-mm-dd)", "Set SimDate", "2024-01-01")
+    If Len(s) = 10 Then
+        On Error Resume Next
+        d = DateSerial(Left$(s, 4), Mid$(s, 6, 2), Right$(s, 2))
+        On Error GoTo 0
+        If d > 0 Then
+            Dim cn As Object: Set cn = GetConn(dbPath)
+            EnsureConfigTable cn
+            CfgSet cn, "SimDate", Format$(d, "yyyy-mm-dd")
+            cn.Close: Set cn = Nothing
+            MsgBox "SimDate = " & Format$(d, "yyyy-mm-dd"), vbInformation
+        Else
+            MsgBox "Date invalide.", vbCritical
+        End If
+    End If
+End Sub
+Public Sub ShowSimDate()
+    Dim dbPath As String: dbPath = ThisWorkbook.Path & Application.PathSeparator & DB_NAME
+    Dim d As Date: d = GetSimDate(dbPath)
+    MsgBox "SimDate actuelle = " & Format$(d, "yyyy-mm-dd"), vbInformation
+End Sub
+C) Patch dans ta procédure NormalizeToday
+Ajoute à la fin de NormalizeToday (après tes UPDATE … SET existants) :
+
+    ' --- MODE SIMULATION : force la Production Date ---
+    If TEST_MODE Then
+        Dim dSim As Date: dSim = GetSimDate(dbPath)
+        cn.Execute "UPDATE " & T_TODAY & " SET [Production Date] = " & SqlDate(dSim) & ";"
+    End If
+D) Patch dans ta macro principale MAJ_Retards_Daily_3in1_NoNzIif
+Juste avant Exit Sub, après le MsgBox "Mise à jour terminée …" (ou juste avant le MsgBox si tu préfères), ajoute :
+
+    If TEST_MODE Then BumpSimDate dbPath
+	Ainsi, chaque fois que tu cliques le bouton, la date simulée avance d’1 jour (ou de TEST_STEP_DAYS) et tout ton workflow (staging, history, flux/archives) se comporte comme si on était au lendemain.
+
+🧪 Comment tester Flux → Archive en quelques clics
+	1. Laisse TEST_MODE = True.
+	2. Charge une ligne avec insuffisance < 0 pour une clé (Booking, NO DOSSIER CREDIT).
+	3. Clique le bouton :
+		○ la clé entre en Flux (VG/AM/SL selon la nature < 0), NbJoursRetard = 1.
+	4. Modifie la même clé le run suivant pour que l’insuffisance repasse ≥ 0 (ou supprime la ligne de la feuille).
+	5. Clique à nouveau :
+		○ la date simulée avance, la nature se clôture et une ligne est archivée dans T_Archive (avec EndDate à la date simulée du jour).
+(Tu peux visualiser la date simulée actuelle via ShowSimDate, et la fixer via SetSimDateManual.)
+
+Notes importantes
+	• Tu as commenté EnsureDatabaseAndSchema. Si tu n’as pas déjà créé tes tables à la main, réactive-le au moins une fois ou exécute un petit Sub qui l’appelle, sinon T_Config/T_Flux/etc. n’existeront pas.
+	• Le mode Simulation ne touche que T_Today.[Production Date]. Tout le reste de la logique reste identique, y compris :
+		○ incrément via DateDiff('d', LastUpdateDate, ProductionDate) (idempotent),
+		○ cloture quand insuff ≥ 0 ou clé absente,
+		○ DepassementNA recalculé chaque run,
+		○ flags d’archive via T_HistoryInsuff.
+	• En production, passe TEST_MODE = False (le code cessera de forcer la date et de l’incrémenter).
