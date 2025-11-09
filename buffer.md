@@ -373,3 +373,120 @@ End Function
 - **Une seule ligne par (Booking, NO DOSSIER CREDIT, jour)** dans `T_Archive` pour les natures qui se ferment le même jour.
 - Les colonnes `VG_*`, `AM_*`, `SL_*` et `Flag*` sont **remplies ensemble**.
 - Pas de doublon même si le traitement est relancé (avec le garde-fou).
+
+
+Private Sub BuildCloseBuffer(ByVal cn As Object)
+    cn.Execute "DELETE FROM " & T_CLOSE
+
+    ' Clés à clôturer si AU MOINS une nature se ferme
+    cn.Execute _
+      "INSERT INTO " & T_CLOSE & " (Booking, [NO DOSSIER CREDIT]) " & _
+      "SELECT DISTINCT f.Booking, f.[NO DOSSIER CREDIT] " & _
+      "FROM " & T_FLUX & " AS f " & _
+      "LEFT JOIN " & T_TODAY & " AS t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "WHERE (f.VG_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance VG] >= 0)) " & _
+      "   OR (f.AM_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance AM] >= 0)) " & _
+      "   OR (f.SL_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance SL] >= 0));"
+
+    ' --- VG ---
+    cn.Execute _
+      "UPDATE (" & T_CLOSE & " b INNER JOIN " & T_FLUX & " f ON b.Booking=f.Booking AND b.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT]) " & _
+      "LEFT JOIN " & T_TODAY & " t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.VG_StartDate=f.VG_StartDate, b.VG_Duree=f.VG_NbJoursRetard, " & _
+      "    b.VG_WorstInsuffisance=f.VG_WorstInsuffisance, b.VG_DateWorstInsuffisance=f.VG_DateWorstInsuffisance, " & _
+      "    b.VG_LastInsuffisance=f.VG_LastInsuffisance, b.VG_LastUpdateDate=f.VG_LastUpdateDate, b.FlagVG='YES', " & _
+      "    b.VG_EndDate=IIf(t.Booking Is Null, f.VG_LastUpdateDate, t.[Production Date]) " & _
+      "WHERE f.VG_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance VG] >= 0);"
+
+    ' --- AM ---
+    cn.Execute _
+      "UPDATE (" & T_CLOSE & " b INNER JOIN " & T_FLUX & " f ON b.Booking=f.Booking AND b.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT]) " & _
+      "LEFT JOIN " & T_TODAY & " t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.AM_StartDate=f.AM_StartDate, b.AM_Duree=f.AM_NbJoursRetard, " & _
+      "    b.AM_WorstInsuffisance=f.AM_WorstInsuffisance, b.AM_DateWorstInsuffisance=f.AM_DateWorstInsuffisance, " & _
+      "    b.AM_LastInsuffisance=f.AM_LastInsuffisance, b.AM_LastUpdateDate=f.AM_LastUpdateDate, b.FlagAM='YES', " & _
+      "    b.AM_EndDate=IIf(t.Booking Is Null, f.AM_LastUpdateDate, t.[Production Date]) " & _
+      "WHERE f.AM_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance AM] >= 0);"
+
+    ' --- SL ---
+    cn.Execute _
+      "UPDATE (" & T_CLOSE & " b INNER JOIN " & T_FLUX & " f ON b.Booking=f.Booking AND b.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT]) " & _
+      "LEFT JOIN " & T_TODAY & " t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.SL_StartDate=f.SL_StartDate, b.SL_Duree=f.SL_NbJoursRetard, " & _
+      "    b.SL_WorstInsuffisance=f.SL_WorstInsuffisance, b.SL_DateWorstInsuffisance=f.SL_DateWorstInsuffisance, " & _
+      "    b.SL_LastInsuffisance=f.SL_LastInsuffisance, b.SL_LastUpdateDate=f.SL_LastUpdateDate, b.FlagSL='YES', " & _
+      "    b.SL_EndDate=IIf(t.Booking Is Null, f.SL_LastUpdateDate, t.[Production Date]) " & _
+      "WHERE f.SL_StartDate IS NOT NULL AND (t.Booking IS NULL OR t.[Insuffisance SL] >= 0);"
+
+    ' Champs communs (Today si présent, sinon Flux) — sans Nz
+    cn.Execute _
+      "UPDATE (" & T_CLOSE & " b INNER JOIN " & T_FLUX & " f ON b.Booking=f.Booking AND b.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT]) " & _
+      "LEFT JOIN " & T_TODAY & " t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.Limite = IIf(t.Limite Is Null, f.Limite, t.Limite), " & _
+      "    b.Consommation = IIf(t.Consommation Is Null, f.Consommation, t.Consommation), " & _
+      "    b.[Montant VG] = IIf(t.[Montant VG] Is Null, f.[Montant VG], t.[Montant VG]), " & _
+      "    b.[Montant AM] = IIf(t.[Montant AM] Is Null, f.[Montant AM], t.[Montant AM]), " & _
+      "    b.[Montant SL] = IIf(t.[Montant SL] Is Null, f.[Montant SL], t.[Montant SL]), " & _
+      "    b.[Production Date] = IIf(t.[Production Date] Is Null, f.[Production Date], t.[Production Date]), " & _
+      "    b.[NO INTERVENANT] = IIf(t.[NO INTERVENANT] Is Null, f.[NO INTERVENANT], t.[NO INTERVENANT]), " & _
+      "    b.[NO INTERVENANT GRP] = IIf(t.[NO INTERVENANT GRP] Is Null, f.[NO INTERVENANT GRP], t.[NO INTERVENANT GRP]);"
+
+    ' DepassementNA (Today dispo) — on met à jour sans Nz
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " b INNER JOIN " & T_TODAY & " t " & _
+      "ON b.Booking=t.Booking AND b.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.DepassementNA = IIf(Abs(t.Consommation) > t.Limite, 'YES','NO');"
+
+    ' DepassementNA hérité de Flux quand Today absent (corrigé AND)
+    cn.Execute _
+      "UPDATE (" & T_CLOSE & " b INNER JOIN " & T_FLUX & " f ON b.Booking=f.Booking AND b.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT]) " & _
+      "LEFT JOIN " & T_TODAY & " t ON f.Booking=t.Booking AND f.[NO DOSSIER CREDIT]=t.[NO DOSSIER CREDIT] " & _
+      "SET b.DepassementNA = IIf(Abs(f.Consommation) > f.Limite, 'YES','NO') " & _
+      "WHERE t.Booking IS NULL;"
+
+    ' ===== Chevauchements via T_HIST (calcul des Flags dans le buffer) =====
+    ' VG -> AM/SL
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagAM='YES' " & _
+      "WHERE b.FlagVG='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='AM' " & _
+      "    AND h.[Production Date] BETWEEN b.VG_StartDate AND b.VG_EndDate AND h.Insuffisance < 0);"
+
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagSL='YES' " & _
+      "WHERE b.FlagVG='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='SL' " & _
+      "    AND h.[Production Date] BETWEEN b.VG_StartDate AND b.VG_EndDate AND h.Insuffisance < 0);"
+
+    ' AM -> VG/SL
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagVG='YES' " & _
+      "WHERE b.FlagAM='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='VG' " & _
+      "    AND h.[Production Date] BETWEEN b.AM_StartDate AND b.AM_EndDate AND h.Insuffisance < 0);"
+
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagSL='YES' " & _
+      "WHERE b.FlagAM='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='SL' " & _
+      "    AND h.[Production Date] BETWEEN b.AM_StartDate AND b.AM_EndDate AND h.Insuffisance < 0);"
+
+    ' SL -> VG/AM
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagVG='YES' " & _
+      "WHERE b.FlagSL='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='VG' " & _
+      "    AND h.[Production Date] BETWEEN b.SL_StartDate AND b.SL_EndDate AND h.Insuffisance < 0);"
+
+    cn.Execute _
+      "UPDATE " & T_CLOSE & " AS b SET b.FlagAM='YES' " & _
+      "WHERE b.FlagSL='YES' AND EXISTS (" & _
+      "  SELECT 1 FROM " & T_HIST & " h " & _
+      "  WHERE h.Booking=b.Booking AND h.[NO DOSSIER CREDIT]=b.[NO DOSSIER CREDIT] AND h.Nature='AM' " & _
+      "    AND h.[Production Date] BETWEEN b.SL_StartDate AND b.SL_EndDate AND h.Insuffisance < 0);"
+End Sub
