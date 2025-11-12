@@ -1,0 +1,436 @@
+' ===========================================================
+' Enrichissement UltraFastCore
+'   - ultra rapide
+'   - lisible
+'   - maintenable
+'   - 3 modes simples: "BOTH" (par défaut), "FLUX", "ARCHIVE"
+'
+' Sorties standard (toujours les mêmes colonnes physiques) :
+'   NB Jours retard VG / AM / SL
+'   Date début VG / AM / SL
+'   Date fin VG / AM / SL
+'   Dépassement non autorisé
+'
+' => exactement ce que tu avais AVANT
+'
+' Différence : tout est calculé en RAM puis injecté en bloc
+' ===========================================================
+Public Sub EnrichSheetFromFlux_3in1( _
+        ByVal dbPath As String, _
+        ByVal ws As Worksheet, _
+        Optional ByVal modeView As String = "BOTH" _
+    )
+
+    '----------------------------
+    ' 0. Préparation feuille
+    '----------------------------
+    Dim map As Object: Set map = CreateObject("Scripting.Dictionary")
+    MapCol map, ws, COL_BOOKING
+    MapCol map, ws, COL_DOSSIER
+    MapCol map, ws, COL_CONSO
+    MapCol map, ws, COL_LIMITE
+
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, map(COL_BOOKING)).End(xlUp).Row
+    If lastRow < 2 Then Exit Sub
+
+    Dim n As Long
+    n = lastRow - 1  ' nombre de lignes de data
+
+    ' Assure colonnes de sortie (on récupère les index)
+    Dim cNBJ_VG As Long, cDEB_VG As Long, cFIN_VG As Long
+    Dim cNBJ_AM As Long, cDEB_AM As Long, cFIN_AM As Long
+    Dim cNBJ_SL As Long, cDEB_SL As Long, cFIN_SL As Long
+    Dim cNA As Long
+
+    cNBJ_VG = EnsureColumn(ws, COL_NBJ_VG)
+    cDEB_VG = EnsureColumn(ws, COL_DEB_VG)
+    cFIN_VG = EnsureColumn(ws, COL_FIN_VG)
+
+    cNBJ_AM = EnsureColumn(ws, COL_NBJ_AM)
+    cDEB_AM = EnsureColumn(ws, COL_DEB_AM)
+    cFIN_AM = EnsureColumn(ws, COL_FIN_AM)
+
+    cNBJ_SL = EnsureColumn(ws, COL_NBJ_SL)
+    cDEB_SL = EnsureColumn(ws, COL_DEB_SL)
+    cFIN_SL = EnsureColumn(ws, COL_FIN_SL)
+
+    cNA = EnsureColumn(ws, COL_FLAG_NA)
+
+    ' Lecture "en bloc" des colonnes source pour NA + clé
+    Dim arrBk As Variant, arrNdc As Variant, arrConso As Variant, arrLim As Variant
+    arrBk = ws.Range(ws.Cells(2, map(COL_BOOKING)), ws.Cells(lastRow, map(COL_BOOKING))).Value2
+    arrNdc = ws.Range(ws.Cells(2, map(COL_DOSSIER)), ws.Cells(lastRow, map(COL_DOSSIER))).Value2
+    arrConso = ws.Range(ws.Cells(2, map(COL_CONSO)), ws.Cells(lastRow, map(COL_CONSO))).Value2
+    arrLim = ws.Range(ws.Cells(2, map(COL_LIMITE)), ws.Cells(lastRow, map(COL_LIMITE))).Value2
+
+    '----------------------------
+    ' 1. Charger FLUX et ARCHIVE dans un seul dictionnaire fusionné
+    '    dict(key Booking||NDC) -> structure 9 champs :
+    '    VG_Deb, VG_Nbj, VG_Fin,
+    '    AM_Deb, AM_Nbj, AM_Fin,
+    '    SL_Deb, SL_Nbj, SL_Fin
+    '----------------------------
+    Dim snap As Object
+    Set snap = BuildSnapshot_FluxArchive(dbPath, DetectSheetProductionDate(ws))
+
+    '----------------------------
+    ' 2. Construire les tableaux de sortie en RAM
+    '----------------------------
+    Dim oNBJ_VG() As Variant, oDEB_VG() As Variant, oFIN_VG() As Variant
+    Dim oNBJ_AM() As Variant, oDEB_AM() As Variant, oFIN_AM() As Variant
+    Dim oNBJ_SL() As Variant, oDEB_SL() As Variant, oFIN_SL() As Variant
+    Dim oNA() As Variant
+
+    ReDim oNBJ_VG(1 To n, 1 To 1)
+    ReDim oDEB_VG(1 To n, 1 To 1)
+    ReDim oFIN_VG(1 To n, 1 To 1)
+
+    ReDim oNBJ_AM(1 To n, 1 To 1)
+    ReDim oDEB_AM(1 To n, 1 To 1)
+    ReDim oFIN_AM(1 To n, 1 To 1)
+
+    ReDim oNBJ_SL(1 To n, 1 To 1)
+    ReDim oDEB_SL(1 To n, 1 To 1)
+    ReDim oFIN_SL(1 To n, 1 To 1)
+
+    ReDim oNA(1 To n, 1 To 1)
+
+    Dim i As Long
+    Dim k As String
+    Dim rec As Variant   ' tableau(0..8) venant de snap
+
+    Dim useFlux As Boolean, useArc As Boolean
+    Select Case UCase$(Trim$(modeView))
+        Case "FLUX":    useFlux = True:  useArc = False
+        Case "ARCHIVE": useFlux = False: useArc = True
+        Case Else:      useFlux = True:  useArc = True   ' BOTH (= mode historique)
+    End Select
+
+    For i = 1 To n
+        k = MakeKey(arrBk(i, 1), arrNdc(i, 1))
+
+        ' calcul NA direct depuis feuille (jour affiché)
+        If Abs(NzDbl(arrConso(i, 1))) > NzDbl(arrLim(i, 1)) Then
+            oNA(i, 1) = "YES"
+        Else
+            oNA(i, 1) = "NO"
+        End If
+
+        If snap.Exists(k) Then
+            rec = snap(k) ' rec(0..8)
+
+            ' rec contient déjà FLUX et ARCHIVE fusionnés :
+            ' indices:
+            '   0=VG_Deb_Flux, 1=VG_Nbj_Flux, 2=VG_Fin_Arc
+            '   3=AM_Deb_Flux, 4=AM_Nbj_Flux, 5=AM_Fin_Arc
+            '   6=SL_Deb_Flux, 7=SL_Nbj_Flux, 8=SL_Fin_Arc
+            '
+            ' et on a AUSSI stocké ce qui vient d'ARCHIVE (début/durée) dans d'autres slots internes,
+            ' mais pour rester simple et rapide on va juste lire ce dont on a besoin via helpers :
+            Dim VG_Deb_Flux As Variant, VG_Nbj_Flux As Variant, VG_Fin_Arc As Variant
+            Dim AM_Deb_Flux As Variant, AM_Nbj_Flux As Variant, AM_Fin_Arc As Variant
+            Dim SL_Deb_Flux As Variant, SL_Nbj_Flux As Variant, SL_Fin_Arc As Variant
+
+            VG_Deb_Flux = rec(0): VG_Nbj_Flux = rec(1): VG_Fin_Arc = rec(2)
+            AM_Deb_Flux = rec(3): AM_Nbj_Flux = rec(4): AM_Fin_Arc = rec(5)
+            SL_Deb_Flux = rec(6): SL_Nbj_Flux = rec(7): SL_Fin_Arc = rec(8)
+
+            ' on a aussi archinfo (début/durée, etc.). On les aura rangés dans snapExt(...) si besoin.
+            ' Pour rester minimaliste on ne surcharge pas ici.
+            ' Si tu veux vraiment FULL archive-only, on devra enrichir snap() (voir plus bas).
+
+            Select Case UCase$(Trim$(modeView))
+
+                Case "FLUX"
+                    ' On ne prend QUE le flux courant :
+                    oDEB_VG(i, 1) = VG_Deb_Flux
+                    oNBJ_VG(i, 1) = VG_Nbj_Flux
+                    oFIN_VG(i, 1) = Empty
+
+                    oDEB_AM(i, 1) = AM_Deb_Flux
+                    oNBJ_AM(i, 1) = AM_Nbj_Flux
+                    oFIN_AM(i, 1) = Empty
+
+                    oDEB_SL(i, 1) = SL_Deb_Flux
+                    oNBJ_SL(i, 1) = SL_Nbj_Flux
+                    oFIN_SL(i, 1) = Empty
+
+                Case "ARCHIVE"
+                    ' archive-only = on veut début/durée/fin du dernier épisode clos (même jour)
+                    ' => pour ça il faut que snap stocke AUSSI Deb_Arc, Duree_Arc pour chaque nature.
+                    ' On va lire les slots Arc pendant la fusion dans BuildSnapshot_FluxArchive.
+                    Dim recArc As Variant
+                    recArc = snap(k & "#ARC") ' recArc(0..8):
+                    '    0=VG_Deb_Arc,1=VG_Dur_Arc,2=VG_Fin_Arc
+                    '    3=AM_Deb_Arc,4=AM_Dur_Arc,5=AM_Fin_Arc
+                    '    6=SL_Deb_Arc,7=SL_Dur_Arc,8=SL_Fin_Arc
+
+                    oDEB_VG(i, 1) = recArc(0)
+                    oNBJ_VG(i, 1) = recArc(1)
+                    oFIN_VG(i, 1) = recArc(2)
+
+                    oDEB_AM(i, 1) = recArc(3)
+                    oNBJ_AM(i, 1) = recArc(4)
+                    oFIN_AM(i, 1) = recArc(5)
+
+                    oDEB_SL(i, 1) = recArc(6)
+                    oNBJ_SL(i, 1) = recArc(7)
+                    oFIN_SL(i, 1) = recArc(8)
+
+                Case Else ' BOTH
+                    ' logique "historique" : début/nbj depuis Flux si dispo, sinon archive;
+                    ' fin = archive du jour
+                    Dim recArcBoth As Variant
+                    recArcBoth = snap(k & "#ARC")
+
+                    ' VG
+                    oDEB_VG(i, 1) = FirstNotEmpty(VG_Deb_Flux, recArcBoth(0))
+                    oNBJ_VG(i, 1) = FirstNotEmpty(VG_Nbj_Flux, recArcBoth(1))
+                    oFIN_VG(i, 1) = recArcBoth(2)
+
+                    ' AM
+                    oDEB_AM(i, 1) = FirstNotEmpty(AM_Deb_Flux, recArcBoth(3))
+                    oNBJ_AM(i, 1) = FirstNotEmpty(AM_Nbj_Flux, recArcBoth(4))
+                    oFIN_AM(i, 1) = recArcBoth(5)
+
+                    ' SL
+                    oDEB_SL(i, 1) = FirstNotEmpty(SL_Deb_Flux, recArcBoth(6))
+                    oNBJ_SL(i, 1) = FirstNotEmpty(SL_Nbj_Flux, recArcBoth(7))
+                    oFIN_SL(i, 1) = recArcBoth(8)
+
+            End Select
+        End If
+    Next i
+
+    '----------------------------
+    ' 3. Ecrire en bloc dans la feuille
+    '----------------------------
+    ws.Cells(2, cNBJ_VG).Resize(n, 1).Value2 = oNBJ_VG
+    ws.Cells(2, cDEB_VG).Resize(n, 1).Value2 = oDEB_VG
+    ws.Cells(2, cFIN_VG).Resize(n, 1).Value2 = oFIN_VG
+
+    ws.Cells(2, cNBJ_AM).Resize(n, 1).Value2 = oNBJ_AM
+    ws.Cells(2, cDEB_AM).Resize(n, 1).Value2 = oDEB_AM
+    ws.Cells(2, cFIN_AM).Resize(n, 1).Value2 = oFIN_AM
+
+    ws.Cells(2, cNBJ_SL).Resize(n, 1).Value2 = oNBJ_SL
+    ws.Cells(2, cDEB_SL).Resize(n, 1).Value2 = oDEB_SL
+    ws.Cells(2, cFIN_SL).Resize(n, 1).Value2 = oFIN_SL
+
+    ws.Cells(2, cNA).Resize(n, 1).Value2 = oNA
+
+    ' Formats
+    ws.Columns(cNBJ_VG).NumberFormat = "0"
+    ws.Columns(cNBJ_AM).NumberFormat = "0"
+    ws.Columns(cNBJ_SL).NumberFormat = "0"
+
+    ws.Columns(cDEB_VG).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cDEB_AM).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cDEB_SL).NumberFormat = "dd/mm/yyyy"
+
+    ws.Columns(cFIN_VG).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cFIN_AM).NumberFormat = "dd/mm/yyyy"
+    ws.Columns(cFIN_SL).NumberFormat = "dd/mm/yyyy"
+
+End Sub
+
+
+'---------------------------------------------------------
+' Construit le snapshot fusionné FLUX + ARCHIVE en RAM
+'   snap(key)     = 9 champs Flux/FinArc rapides
+'   snap(key&"#ARC") = 9 champs Archive "propres"
+'
+' Objectif : TOUT calculé ici, pas ailleurs
+'---------------------------------------------------------
+Private Function BuildSnapshot_FluxArchive(ByVal dbPath As String, ByVal endDate As Variant) As Object
+    Dim D As Object: Set D = CreateObject("Scripting.Dictionary")
+    D.CompareMode = 1 ' textcompare pour les clés
+
+    Dim cn As Object: Set cn = GetConn(dbPath)
+
+    ' === 1) FLUX courant
+    Dim sqlF As String, cntF As String, vF As Variant
+    sqlF = _
+      "SELECT Booking, [NO DOSSIER CREDIT]," & _
+      " VG_StartDate, VG_NbJoursRetard," & _
+      " AM_StartDate, AM_NbJoursRetard," & _
+      " SL_StartDate, SL_NbJoursRetard " & _
+      "FROM " & T_FLUX
+    cntF = "SELECT COUNT(*) FROM " & T_FLUX
+
+    vF = RSGetRowsFast(cn, sqlF, cntF)
+    If ArrayHasRows2D(vF) Then
+        Dim i As Long
+        For i = 0 To UBound(vF, 2)
+            Dim keyF As String
+            keyF = MakeKey(vF(0, i), vF(1, i))
+
+            ' Structure Flux (9 slots) init
+            ' index 0..8 comme plus haut,
+            ' pour l'instant "Fin" seront vides, on les remplira avec l'archive
+            Dim arr9(0 To 8) As Variant
+            arr9(0) = vF(2, i) ' VG_StartDate (flux)
+            arr9(1) = vF(3, i) ' VG_NbJoursRetard
+            arr9(2) = Empty    ' VG_Fin_Arc (sera complété)
+            arr9(3) = vF(4, i) ' AM_StartDate
+            arr9(4) = vF(5, i) ' AM_NbJoursRetard
+            arr9(5) = Empty    ' AM_Fin_Arc
+            arr9(6) = vF(6, i) ' SL_StartDate
+            arr9(7) = vF(7, i) ' SL_NbJoursRetard
+            arr9(8) = Empty    ' SL_Fin_Arc
+
+            D(keyF) = arr9
+
+            ' On met aussi une structure archive parallèle pour ce key,
+            ' qu'on complètera après (sinon Erreur si ARCHIVE-only plus tard)
+            Dim arrArc(0 To 8) As Variant
+            ' arrArc(0)=VG_Deb_Arc,1=VG_Dur_Arc,2=VG_Fin_Arc
+            ' arrArc(3..5)=AM..., 6..8=SL...
+            ' Init à Empty
+            D(keyF & "#ARC") = arrArc
+        Next i
+    End If
+
+    ' === 2) ARCHIVE (fins = endDate)
+    If IsDate(endDate) Then
+        Dim dStr As String: dStr = Format(CDate(endDate), "mm/dd/yyyy")
+        Dim sqlA As String, cntA As String, vA As Variant
+
+        sqlA = _
+          "SELECT Booking, [NO DOSSIER CREDIT]," & _
+          " VG_StartDate, VG_Duree, VG_EndDate," & _
+          " AM_StartDate, AM_Duree, AM_EndDate," & _
+          " SL_StartDate, SL_Duree, SL_EndDate " & _
+          "FROM " & T_ARC & " " & _
+          "WHERE (FlagVG='YES' AND VG_EndDate=#" & dStr & "#) " & _
+          "   OR (FlagAM='YES' AND AM_EndDate=#" & dStr & "#) " & _
+          "   OR (FlagSL='YES' AND SL_EndDate=#" & dStr & "#)"
+
+        cntA = _
+          "SELECT COUNT(*) FROM " & T_ARC & " " & _
+          "WHERE (FlagVG='YES' AND VG_EndDate=#" & dStr & "#) " & _
+          "   OR (FlagAM='YES' AND AM_EndDate=#" & dStr & "#) " & _
+          "   OR (FlagSL='YES' AND SL_EndDate=#" & dStr & "#)"
+
+        vA = RSGetRowsFast(cn, sqlA, cntA)
+
+        If ArrayHasRows2D(vA) Then
+            Dim j As Long
+            For j = 0 To UBound(vA, 2)
+                Dim keyA As String
+                keyA = MakeKey(vA(0, j), vA(1, j))
+
+                Dim existFlux As Boolean
+                existFlux = D.Exists(keyA)
+
+                Dim arr9b(0 To 8) As Variant
+                Dim arrArcB(0 To 8) As Variant
+
+                ' si la clé existait déjà (flux), on repart de ce qu'on a
+                If existFlux Then
+                    arr9b = D(keyA)
+                    arrArcB = D(keyA & "#ARC")
+                Else
+                    ' sinon on init vide côté flux
+                    arr9b(0) = Empty: arr9b(1) = Empty: arr9b(2) = Empty
+                    arr9b(3) = Empty: arr9b(4) = Empty: arr9b(5) = Empty
+                    arr9b(6) = Empty: arr9b(7) = Empty: arr9b(8) = Empty
+                    ' et on crée aussi l'arc struct
+                    ' (on la remplit juste après)
+                End If
+
+                ' remplir infos archive :
+                ' VG bloc
+                If Not IsEmpty(vA(2, j)) Or Not IsEmpty(vA(4, j)) Then
+                    ' Deb_Arc VG = vA(2,j)
+                    ' Dur_Arc VG = vA(3,j)
+                    ' Fin_Arc VG = vA(4,j)
+                    arrArcB(0) = vA(2, j)
+                    arrArcB(1) = vA(3, j)
+                    arrArcB(2) = vA(4, j)
+                    ' on pousse la Fin_Arc dans arr9b(2)
+                    arr9b(2) = vA(4, j)
+                End If
+
+                ' AM bloc
+                If Not IsEmpty(vA(5, j)) Or Not IsEmpty(vA(7, j)) Then
+                    arrArcB(3) = vA(5, j)
+                    arrArcB(4) = vA(6, j)
+                    arrArcB(5) = vA(7, j)
+                    arr9b(5) = vA(7, j)
+                End If
+
+                ' SL bloc
+                If Not IsEmpty(vA(8, j)) Or Not IsEmpty(vA(10, j)) Then
+                    arrArcB(6) = vA(8, j)
+                    arrArcB(7) = vA(9, j)
+                    arrArcB(8) = vA(10, j)
+                    arr9b(8) = vA(10, j)
+                End If
+
+                ' sauvegarde
+                D(keyA) = arr9b
+                D(keyA & "#ARC") = arrArcB
+            Next j
+        End If
+    End If
+
+    cn.Close: Set cn = Nothing
+    Set BuildSnapshot_FluxArchive = D
+End Function
+
+
+' Retourne v1 si non vide, sinon v2
+Private Function FirstNotEmpty(ByVal v1 As Variant, ByVal v2 As Variant) As Variant
+    If IsEmpty(v1) Or IsNull(v1) Or (VarType(v1) = vbString And Trim$(v1) = "") Then
+        FirstNotEmpty = v2
+    Else
+        FirstNotEmpty = v1
+    End If
+End Function
+
+
+
+
+' Vue actuelle "mix" (début+jours flux, fin archive jour courant)
+Call EnrichSheetFromFlux_3in1(dbPath, ActiveSheet, "BOTH")
+
+' Vue Flux pur
+Call EnrichSheetFromFlux_3in1(dbPath, ActiveSheet, "FLUX")
+
+' Vue Archive pure (durées finales archivées du jour)
+Call EnrichSheetFromFlux_3in1(dbPath, ActiveSheet, "ARCHIVE")
+
+
+=> Zéro modif interne.
+
+Niveau 2 (ajouter des champs)
+
+Tu veux par exemple afficher dans Excel aussi :
+
+Limite (Flux),
+
+Consommation (Flux),
+
+DepassementNA archive (ou autre champ archive genre WorstInsuffisance, etc.).
+
+Tu fais ça en 2 steps :
+
+Étape fusion (BuildSnapshot_FluxArchive)
+
+Tu lis les colonnes en plus dans les SELECT.
+
+Tu les ranges dans arr9b() ou dans un nouveau array arrExtra() pour la clé.
+
+Tu stockes ça dans D(keyA & "#EXTRA") = arrExtra.
+
+Étape rendu (boucle For i = 1 To n)
+
+Tu crées un nouveau tableau sortie oLimite(), tu le remplis en même temps que oNBJ_VG etc.
+
+À la fin tu EnsureColumn(ws, "Limite Flux") et tu .Resize(...).Value2 = oLimite.
+
+Donc tu rajoutes un champ → tu touches juste 2 endroits, et tu le paies une seule fois.
+
+Tu n’as plus besoin d’une “order” dynamique, ni de dico imbriqué par champ, ni d’une feuille _Enrich_Config si tu veux rester simple.

@@ -1,0 +1,175 @@
+Super, je veux maintenant rajouter 3 champs commentaires en flux et archives risk_cmt, front_cmt, et close_cmt risk_cmt et front_cmt suivront au fil de l'eau le numero dossier + booking, donc se metteront a jour au fil de l'eau alors que close_cmt, sera le commentaire pour expliquer l'origine du dépassement sur la period risk_cmt est notre commentaire risque et front_cmt est le commentaire réponse du front dit moi toutes les modifications que je dois faire dans le code
+
+Parfait. Voici tout ce qu’il faut modifier/ajouter pour intégrer les 3 champs de commentaires – risk_cmt, front_cmt, close_cmt – dans FLUX, Archive (et le buffer de clôture), les propager correctement au moment des clôtures, et (optionnel) les synchroniser depuis la feuille Excel (par Booking+N° crédit), sans rien casser de ton pipeline.
+
+1) Nouvelles constantes d’en-têtes (si tu veux saisir les commentaires dans la feuille)
+Ajoute ces 3 constantes, en haut avec les autres COL_* :
+
+Private Const COL_RISK_CMT  As String = "risk_cmt"
+Private Const COL_FRONT_CMT As String = "front_cmt"
+Private Const COL_CLOSE_CMT As String = "close_cmt"
+	Si tu ne saisis pas ces colonnes dans la feuille, garde quand même ces constantes (elles ne seront pas utilisées).
+
+2) DDL — ajouter les 3 colonnes dans T_Flux, T_Archive, T_CloseBuf
+2.1. Mettre à jour les fonctions DDL (pour bases neuves)
+GetDDL_Flux() → ajoute en fin de table :
+
+", risk_cmt LONGTEXT, front_cmt LONGTEXT, close_cmt LONGTEXT, " & _
+"CONSTRAINT PK_Flux3 PRIMARY KEY (Booking, [NO DOSSIER CREDIT]) );"
+GetDDL_Arc() → ajoute avant la parenthèse finale :
+
+", risk_cmt LONGTEXT, front_cmt LONGTEXT, close_cmt LONGTEXT);"
+	(ou place-les juste avant DepassementNA si tu veux un groupement logique — l’ordre n’a pas d’impact)
+GetDDL_Close() → ajoute avant la PK :
+
+"  DepassementNA TEXT(3), " & _
+"  FlagVG TEXT(3) , FlagAM TEXT(3) , FlagSL TEXT(3) , " & _
+"  risk_cmt LONGTEXT, front_cmt LONGTEXT, close_cmt LONGTEXT, " & _
+"  CONSTRAINT PK_CloseBuf PRIMARY KEY (Booking, [NO DOSSIER CREDIT])" & _
+");"
+2.2. Migration bases existantes (ALTER TABLE si les colonnes manquent)
+Ajoute ces helpers :
+
+'--- colonne existe ? ---
+Private Function ColumnExists(ByVal cn As ADODB.Connection, ByVal tableName As String, ByVal colName As String) As Boolean
+    On Error GoTo fin
+    Dim rs As Object
+    Set rs = cn.OpenSchema(4, Array(Empty, Empty, tableName, colName)) ' adSchemaColumns=4
+    ColumnExists = Not (rs Is Nothing Or rs.EOF)
+    If Not rs Is Nothing Then rs.Close
+    Set rs = Nothing
+    Exit Function
+fin:
+    ColumnExists = False
+End Function
+'--- ajoute colonne si manquante ---
+Private Sub AddColumnIfMissing(ByVal cn As ADODB.Connection, ByVal tableName As String, ByVal colName As String, ByVal ddlType As String)
+    If Not ColumnExists(cn, tableName, colName) Then
+        cn.Execute "ALTER TABLE " & tableName & " ADD COLUMN [" & colName & "] " & ddlType, , 128
+    End If
+End Sub
+'--- garantit les 3 colonnes de commentaires dans FLUX/ARC/CLOSE ---
+Private Sub EnsureCommentColumns(ByVal cn As ADODB.Connection)
+    AddColumnIfMissing cn, T_FLUX,  "risk_cmt",  "LONGTEXT"
+    AddColumnIfMissing cn, T_FLUX,  "front_cmt", "LONGTEXT"
+    AddColumnIfMissing cn, T_FLUX,  "close_cmt", "LONGTEXT"
+AddColumnIfMissing cn, T_ARC,   "risk_cmt",  "LONGTEXT"
+    AddColumnIfMissing cn, T_ARC,   "front_cmt", "LONGTEXT"
+    AddColumnIfMissing cn, T_ARC,   "close_cmt", "LONGTEXT"
+AddColumnIfMissing cn, T_CLOSE, "risk_cmt",  "LONGTEXT"
+    AddColumnIfMissing cn, T_CLOSE, "front_cmt", "LONGTEXT"
+    AddColumnIfMissing cn, T_CLOSE, "close_cmt", "LONGTEXT"
+End Sub
+👉 Appelle EnsureCommentColumns cn dans Main_Histo juste après l’ouverture de connexion (et/ou dans EnsureDatabaseAndSchema) :
+
+Set cn = GetConn(dbPath)
+EnsureCommentColumns cn
+
+3) Propagation au moment des clôtures (buffer ➜ archive)
+3.1. BuildCloseBuffer — champs communs : copie les commentaires depuis FLUX
+Dans la section “3) Champs communs (Today si présent, sinon Flux)”, ajoute la mise à jour des 3 commentaires uniquement depuis FLUX (ils ne viennent pas de T_Today) :
+
+"    b.[NO INTERVENANT GRP] = IIf(t.[NO INTERVENANT GRP] Is Null, f.[NO INTERVENANT GRP], t.[NO INTERVENANT GRP]), " & _
+"    b.risk_cmt = f.risk_cmt, b.front_cmt = f.front_cmt, b.close_cmt = f.close_cmt;"
+	Garde le ; final (remplace le ; existant si tu avais terminé la ligne précédente par un ;).
+3.2. InsertCloseBufferToArchive — insérer aussi les 3 champs
+Ajoute les colonnes dans la liste d’insert et leur SELECT associé :
+
+"  DepassementNA, FlagVG, FlagAM, FlagSL, risk_cmt, front_cmt, close_cmt" & _
+") " & _
+"SELECT " & _
+...
+"  b.DepassementNA, b.FlagVG, b.FlagAM, b.FlagSL, b.risk_cmt, b.front_cmt, b.close_cmt " & _
+"FROM " & T_CLOSE & " b;"
+
+4) (Optionnel) Synchroniser les commentaires depuis la feuille vers T_Flux
+Comme tu veux que risk_cmt (risque) et front_cmt (front) “suivent au fil de l’eau” par (Booking, NDC), voici une MAJ ultra-rapide par UPDATE JOIN direct sur l’onglet Excel (zéro boucle VBA).
+	On n’écrase pas tes commentaires si la cellule est vide : on met à jour uniquement quand il y a une valeur non vide côté feuille.
+Ajoute :
+
+Private Function ExcelSpecFromPath(ByVal wbPath As String) As String
+    Dim ext As String: ext = LCase$(Mid$(wbPath, InStrRev(wbPath, ".") + 1))
+    Select Case ext
+        Case "xlsx", "xlsm": ExcelSpecFromPath = "Excel 12.0 Xml"
+        Case "xlsb":         ExcelSpecFromPath = "Excel 12.0"
+        Case "xls":          ExcelSpecFromPath = "Excel 8.0"
+        Case Else:           ExcelSpecFromPath = "Excel 12.0 Xml"
+    End Select
+End Function
+Private Function HasHeader(ws As Worksheet, ByVal hdr As String) As Boolean
+    HasHeader = (FindHeader(ws, hdr) > 0)
+End Function
+'--- met à jour T_Flux.risk_cmt/front_cmt/close_cmt depuis la feuille, à clés égales (Booking+NDC)
+Public Sub SyncCommentsFromSheetToFlux(ByVal cn As ADODB.Connection, ByVal ws As Worksheet)
+    Dim hasRisk As Boolean, hasFront As Boolean, hasClose As Boolean
+    hasRisk = HasHeader(ws, COL_RISK_CMT)
+    hasFront = HasHeader(ws, COL_FRONT_CMT)
+    hasClose = HasHeader(ws, COL_CLOSE_CMT)
+    If Not (hasRisk Or hasFront Or hasClose) Then Exit Sub
+Dim wbPath As String, spec As String, suffixRange As String, lastCell As String, srcRef As String
+    wbPath = ThisWorkbook.FullName
+    spec = ExcelSpecFromPath(wbPath)
+    lastCell = Split(ws.UsedRange.Address(False, False), ":")(UBound(Split(ws.UsedRange.Address(False, False), ":")))
+    suffixRange = "A1:" & lastCell
+srcRef = "[" & spec & ";HDR=YES;IMEX=0;Database=" & wbPath & "].[" & ws.Name & "$" & suffixRange & "]"
+Dim sets As String, whereNonEmpty As String
+    If hasRisk Then
+        sets = sets & IIf(Len(sets) > 0, ", ", "") & " f.risk_cmt = x.[" & COL_RISK_CMT & "]"
+        whereNonEmpty = whereNonEmpty & IIf(Len(whereNonEmpty) > 0, " OR ", "") & " (x.[" & COL_RISK_CMT & "] Is Not Null AND Len(Trim(x.[" & COL_RISK_CMT & "] & ''))>0) "
+    End If
+    If hasFront Then
+        sets = sets & IIf(Len(sets) > 0, ", ", "") & " f.front_cmt = x.[" & COL_FRONT_CMT & "]"
+        whereNonEmpty = whereNonEmpty & IIf(Len(whereNonEmpty) > 0, " OR ", "") & " (x.[" & COL_FRONT_CMT & "] Is Not Null AND Len(Trim(x.[" & COL_FRONT_CMT & "] & ''))>0) "
+    End If
+    If hasClose Then
+        sets = sets & IIf(Len(sets) > 0, ", ", "") & " f.close_cmt = x.[" & COL_CLOSE_CMT & "]"
+        whereNonEmpty = whereNonEmpty & IIf(Len(whereNonEmpty) > 0, " OR ", "") & " (x.[" & COL_CLOSE_CMT & "] Is Not Null AND Len(Trim(x.[" & COL_CLOSE_CMT & "] & ''))>0) "
+    End If
+Dim sql As String
+    sql = _
+      "UPDATE " & T_FLUX & " AS f " & _
+      "INNER JOIN " & srcRef & " AS x " & _
+      "ON f.Booking = UCase(Trim(x.[Booking])) " & _
+      "AND f.[NO DOSSIER CREDIT] = Trim(x.[NO DOSSIER CREDIT]) " & _
+      "SET " & sets & _
+      " WHERE " & whereNonEmpty & ";"
+cn.Execute sql, , 128
+End Sub
+👉 Où l’appeler ?
+Dans Main_Histo, appelle-la avant ProcessBusinessRules_3in1_NoNzIif pour que, si une nature se ferme aujourd’hui, l’archive récupère déjà la bonne valeur :
+
+'2c) (optionnel) commentaires depuis la feuille -> FLUX
+Call SyncCommentsFromSheetToFlux(cn, ws)
+'3) Historique
+Call AppendHistory(cn)
+'4) Règles de gestion (les close copieront les commentaires FLUX vers Archive)
+Call ProcessBusinessRules_3in1_NoNzIif(cn, newFlux, contFlux, closedFlux)
+'4b) (optionnel) re-sync pour couvrir les flux insérés au point 4.1 (facultatif)
+Call SyncCommentsFromSheetToFlux(cn, ws)
+	Logique : risk_cmt & front_cmt restent dans FLUX et évoluent librement; au moment d’une clôture, close_cmt (et aussi risk_cmt/front_cmt à l’instant T) sont figés dans l’archive via T_CloseBuf ➜ T_Archive.
+
+5) Rien à changer dans tes étapes Import/History/Continuations
+	• Les commentaires ne viennent pas de T_Today → pas d’impact sur BulkLoadTodayFromExcel_Fast, NormalizeToday, AppendHistory, ni sur les continuations (on ne touche pas aux commentaires dans ces UPDATE).
+	• Les INSERT initiaux dans T_Flux n’ont pas besoin des colonnes de commentaires (elles restent Null tant qu’on n’a pas saisi/sync).
+
+6) (Optionnel) Affichage dans la feuille
+Tu disposes déjà de la clé (Booking||NDC) côté enrichissement.
+Le plus simple :
+	• Ajoute 3 colonnes dans la feuille via EnsureColumn(ws, COL_RISK_CMT) etc.
+	• Si tu utilises ma version FAST+CONFIGURABLE de l’enrichissement, c’est immédiat via _Enrich_Config :
+		○ FLUX:risk_cmt → “Commentaire Risque”
+		○ FLUX:front_cmt → “Commentaire Front”
+		○ FLUX:close_cmt → “Commentaire Clôture”
+	• Si tu conserves l’enrichissement “classique”, tu peux ignorer pour l’instant (les champs vivent en base et sont copiés vers archive aux clôtures).
+
+TL;DR — Check-list
+	1. DDL : ajouter risk_cmt, front_cmt, close_cmt dans T_Flux, T_Archive, T_CloseBuf (GetDDL_* + migration EnsureCommentColumns).
+	2. BuildCloseBuffer : dans la section “Champs communs”, copier b.risk_cmt=f.risk_cmt, b.front_cmt=f.front_cmt, b.close_cmt=f.close_cmt.
+	3. InsertCloseBufferToArchive : inclure ces 3 colonnes dans l’INSERT ... SELECT.
+	4. (Optionnel) SyncCommentsFromSheetToFlux(cn, ws) avant ProcessBusinessRules... (et éventuellement après) pour alimenter/mettre à jour les commentaires dans FLUX depuis la feuille, par (Booking, NDC).
+Avec ça, tu peux :
+	• Saisir/mettre à jour tes commentaires au fil de l’eau (ils restent dans FLUX) ;
+	• Figer risk_cmt/front_cmt/close_cmt à la clôture dans Archive ;
+	• Et si tu veux, afficher/éditer ces champs directement dans la feuille Excel en gardant le lien Booking+N° dossier.
+
+

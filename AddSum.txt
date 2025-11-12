@@ -1,0 +1,102 @@
+Oui, carrément — avec la version « ultra simple & rapide » tu peux afficher les retards cumulés très facilement :
+
+Archive cumulée = somme de toutes les durées archivées (tous épisodes clos) par clé et par nature.
+
+Présent (Flux) = *_NbJoursRetard sur les épisodes encore ouverts.
+
+Cumul total = Archive cumulée + Flux en cours.
+
+Voici le plus petit patch à ajouter à la version précédente pour sortir 3 colonnes “Cumul jours VG/AM/SL (Arc+Flux)” — sans aucune boucle Recordset, toujours 1 seule requête, 1 seule boucle Excel.
+
+1) Ajoute l’agrégat Archive dans le SQL (juste après sqlArc)
+Dim sqlSum As String
+sqlSum = _
+  "SELECT Booking, [NO DOSSIER CREDIT], " & _
+  "  SUM(IIf(FlagVG='YES', VG_Duree, NULL)) AS SumVG, " & _
+  "  SUM(IIf(FlagAM='YES', AM_Duree, NULL)) AS SumAM, " & _
+  "  SUM(IIf(FlagSL='YES', SL_Duree, NULL)) AS SumSL " & _
+  "FROM " & T_ARC & " GROUP BY Booking, [NO DOSSIER CREDIT]"
+
+
+Puis intègre sqlSum dans la requête finale (une seule ligne à compléter) :
+
+sql = _
+  "SELECT k.Booking, k.[NO DOSSIER CREDIT], " & _
+  "       f.VG_StartDate  AS VG_Deb_Flux,  f.VG_NbJoursRetard AS VG_Nbj_Flux, " & _
+  "       f.AM_StartDate  AS AM_Deb_Flux,  f.AM_NbJoursRetard AS AM_Nbj_Flux, " & _
+  "       f.SL_StartDate  AS SL_Deb_Flux,  f.SL_NbJoursRetard AS SL_Nbj_Flux, " & _
+  "       a.VG_Deb_Arc, a.VG_Dur_Arc, a.VG_End_Arc, " & _
+  "       a.AM_Deb_Arc, a.AM_Dur_Arc, a.AM_End_Arc, " & _
+  "       a.SL_Deb_Arc, a.SL_Dur_Arc, a.SL_End_Arc, " & _
+  "       s.SumVG, s.SumAM, s.SumSL " & _                    ' <— AJOUT
+  "FROM (SELECT DISTINCT Booking, [NO DOSSIER CREDIT] FROM " & T_TODAY & ") AS k " & _
+  "LEFT JOIN " & T_FLUX & " AS f ON k.Booking=f.Booking AND k.[NO DOSSIER CREDIT]=f.[NO DOSSIER CREDIT] " & _
+  "LEFT JOIN (" & sqlArc & ") AS a ON k.Booking=a.Booking AND k.[NO DOSSIER CREDIT]=a.[NO DOSSIER CREDIT] " & _
+  "LEFT JOIN (" & sqlSum & ") AS s ON k.Booking=s.Booking AND k.[NO DOSSIER CREDIT]=s.[NO DOSSIER CREDIT]"
+
+
+Pas besoin de changer le cnt (le COUNT reste sur la liste distincte des clés de T_Today).
+
+2) Mappe les 3 nouveaux champs et prépare les sorties
+
+Ajoute ces constantes d’index (juste après celles déjà présentes) :
+
+Const F_VG_Deb_F = 2,  F_VG_Nbj_F = 3,  F_AM_Deb_F = 4,  F_AM_Nbj_F = 5,  F_SL_Deb_F = 6,  F_SL_Nbj_F = 7
+Const F_VG_Deb_A = 8,  F_VG_Dur_A = 9,  F_VG_End_A = 10
+Const F_AM_Deb_A = 11, F_AM_Dur_A = 12, F_AM_End_A = 13
+Const F_SL_Deb_A = 14, F_SL_Dur_A = 15, F_SL_End_A = 16
+Const S_VG_SUM   = 17, S_AM_SUM   = 18, S_SL_SUM   = 19   ' <— AJOUT
+
+
+Déclare 3 buffers en plus :
+
+Dim oCUM_VG() As Variant, oCUM_AM() As Variant, oCUM_SL() As Variant
+ReDim oCUM_VG(1 To n, 1 To 1)
+ReDim oCUM_AM(1 To n, 1 To 1)
+ReDim oCUM_SL(1 To n, 1 To 1)
+
+
+Crée les 3 colonnes en feuille (tu peux choisir les intitulés) :
+
+Dim cCUM_VG As Long, cCUM_AM As Long, cCUM_SL As Long
+cCUM_VG = EnsureColumn(ws, "Cumul jours VG (Arc+Flux)")
+cCUM_AM = EnsureColumn(ws, "Cumul jours AM (Arc+Flux)")
+cCUM_SL = EnsureColumn(ws, "Cumul jours SL (Arc+Flux)")
+
+3) Calcule le cumul dans la boucle unique (même endroit que le remplissage standard)
+
+Ajoute simplement ces 3 lignes dans la boucle For i = 1 To n, après avoir récupéré rowIdx :
+
+' cumul = somme archive (tous épisodes clos) + jours en cours du flux
+oCUM_VG(i, 1) = NzDbl(v(S_VG_SUM, rowIdx)) + NzDbl(v(F_VG_Nbj_F, rowIdx))
+oCUM_AM(i, 1) = NzDbl(v(S_AM_SUM, rowIdx)) + NzDbl(v(F_AM_Nbj_F, rowIdx))
+oCUM_SL(i, 1) = NzDbl(v(S_SL_SUM, rowIdx)) + NzDbl(v(F_SL_Nbj_F, rowIdx))
+
+
+Pas besoin de tester si l’épisode flux est ouvert : NzDbl renverra 0 si NbJ est Null.
+
+4) Écris-les et formate
+
+Après les écritures existantes, ajoute :
+
+ws.Cells(2, cCUM_VG).Resize(n, 1).Value2 = oCUM_VG
+ws.Cells(2, cCUM_AM).Resize(n, 1).Value2 = oCUM_AM
+ws.Cells(2, cCUM_SL).Resize(n, 1).Value2 = oCUM_SL
+
+ws.Columns(cCUM_VG).NumberFormat = "0"
+ws.Columns(cCUM_AM).NumberFormat = "0"
+ws.Columns(cCUM_SL).NumberFormat = "0"
+
+Ce que tu obtiens
+
+Toujours la vue standard (début / nb jours / fin) selon modeView = "BOTH" | "FLUX" | "ARCHIVE".
+
+En plus, 3 colonnes “Cumul jours … (Arc+Flux)” calculées au fil de l’eau :
+
+Archive cumulée = somme de toutes les durées archivées pour la clé (pas seulement du jour).
+
+Flux en cours = *_NbJoursRetard (0 si non ouvert).
+
+Total = Archive cumulée + Flux en cours.
+
+Le tout clé → Booking + NO DOSSIER CREDIT (la jointure et l’indexation sont déjà faites sur cette clé, donc l’association est 100% fiable avec la feuille).
